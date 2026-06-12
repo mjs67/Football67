@@ -232,7 +232,7 @@ function GroupTable({ group, me }) {
                 ) : (
                   <span className="who-fallback" aria-hidden="true" />
                 )}
-                {r.displayName || "Anonymous"}
+                {r.nickname || r.displayName || "Anonymous"}
                 {r.id === group.ownerUid && <span className="owner-chip">C</span>}
               </span>
               <span className="stat">{r.exact ?? 0}</span>

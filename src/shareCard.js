@@ -16,7 +16,7 @@ const C = {
   volt: "#c8ff1e",
 };
 
-export async function sharePickCard({ user, matches, predictions }) {
+export async function sharePickCard({ user, matches, predictions, nickname }) {
   // Up to 7 picks: upcoming first (the "receipts"), then most recent results
   const withPicks = matches.filter((m) => predictions[m.id]);
   const upcoming = withPicks
@@ -61,7 +61,7 @@ export async function sharePickCard({ user, matches, predictions }) {
 
   ctx.fillStyle = C.chalk60;
   ctx.font = "500 30px 'Barlow', sans-serif";
-  ctx.fillText(`${user.displayName || "My"} picks — calling it before the whistle`, W / 2, 210);
+  ctx.fillText(`${nickname || user.displayName || "My"} picks — calling it before the whistle`, W / 2, 210);
 
   // Pick rows
   const top = 290;

@@ -1,5 +1,15 @@
 import { useEffect, useState } from "react";
-import { doc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDocs,
+  limit,
+  onSnapshot,
+  query,
+  serverTimestamp,
+  setDoc,
+  where,
+} from "firebase/firestore";
 import { db } from "../firebase.js";
 import { sharePickCard } from "../shareCard.js";
 
@@ -26,6 +36,7 @@ export default function MyPicks({ user, matches, predictions, onRequireSignIn })
   }
   return (
     <>
+      <ProfilePanel user={user} />
       <StatsRow matches={matches} predictions={predictions} />
       <ShareCardButton user={user} matches={matches} predictions={predictions} />
       <FormGraph matches={matches} predictions={predictions} />
@@ -36,8 +47,116 @@ export default function MyPicks({ user, matches, predictions, onRequireSignIn })
   );
 }
 
+function ProfilePanel({ user }) {
+  const [saved, setSaved] = useState(undefined); // nickname currently in Firestore
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [flash, setFlash] = useState("");
+
+  useEffect(
+    () =>
+      onSnapshot(doc(db, "users", user.uid), (s) => {
+        const nick = s.exists() ? s.data().nickname || "" : "";
+        setSaved(nick);
+        setValue((v) => (v === "" || v === saved ? nick : v));
+      }),
+    [user.uid] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  if (saved === undefined) return null;
+
+  const trimmed = value.trim();
+  const valid = /^[A-Za-z0-9 _-]{3,20}$/.test(trimmed);
+  const dirty = trimmed !== saved;
+
+  async function save() {
+    if (!valid || !dirty) return;
+    setBusy(true);
+    try {
+      // Best-effort uniqueness check so two players don't share a name
+      const clash = await getDocs(
+        query(collection(db, "users"), where("nickname", "==", trimmed), limit(1))
+      );
+      if (!clash.empty && clash.docs[0].id !== user.uid) {
+        setFlash("taken");
+        setTimeout(() => setFlash(""), 2200);
+        return;
+      }
+      await setDoc(
+        doc(db, "users", user.uid),
+        {
+          displayName: user.displayName || "Anonymous",
+          photoURL: user.photoURL || "",
+          nickname: trimmed,
+        },
+        { merge: true }
+      );
+      setFlash("saved");
+      setTimeout(() => setFlash(""), 1600);
+    } catch (e) {
+      alert("Could not save nickname: " + e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="panel profile">
+      <div className="profile-id">
+        {user.photoURL ? (
+          <img className="profile-avatar" src={user.photoURL} alt="" referrerPolicy="no-referrer" />
+        ) : (
+          <span className="profile-avatar fallback" aria-hidden="true" />
+        )}
+        <div>
+          <p className="panel-eyebrow">Profile</p>
+          <p className="profile-shown">{saved || user.displayName || "Anonymous"}</p>
+          <p className="panel-note">
+            {saved
+              ? "Your nickname is what everyone sees on leaderboards and leagues."
+              : "Set a nickname — it replaces your Google name on leaderboards and leagues."}
+          </p>
+        </div>
+      </div>
+      <div className="tb-input-row">
+        <input
+          className="tb-input wide"
+          value={value}
+          maxLength={20}
+          placeholder="e.g. xGoalMachine"
+          aria-label="Nickname"
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && save()}
+        />
+        <button className="btn solid" onClick={save} disabled={busy || !valid || !dirty}>
+          {busy
+            ? "Checking…"
+            : flash === "saved"
+            ? "Saved ✓"
+            : flash === "taken"
+            ? "Name taken"
+            : saved
+            ? "Update"
+            : "Save"}
+        </button>
+      </div>
+      {trimmed !== "" && !valid && (
+        <p className="profile-hint">3–20 characters: letters, numbers, spaces, - and _ only.</p>
+      )}
+    </div>
+  );
+}
+
 function ShareCardButton({ user, matches, predictions }) {
   const [busy, setBusy] = useState(false);
+  const [nickname, setNickname] = useState("");
+  useEffect(
+    () =>
+      onSnapshot(doc(db, "users", user.uid), (s) =>
+        setNickname(s.exists() ? s.data().nickname || "" : "")
+      ),
+    [user.uid]
+  );
   const hasPicks = matches.some((m) => predictions[m.id]);
   if (!hasPicks) return null;
   return (
@@ -54,7 +173,7 @@ function ShareCardButton({ user, matches, predictions }) {
         onClick={async () => {
           setBusy(true);
           try {
-            await sharePickCard({ user, matches, predictions });
+            await sharePickCard({ user, matches, predictions, nickname });
           } catch (e) {
             alert(e.message);
           } finally {

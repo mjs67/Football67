@@ -709,3 +709,22 @@ code {
   font-variant-numeric: tabular-nums;
 }
 .odds-early { color: var(--chalk-25); }
+
+/* ── Profile panel ─────────────────────────────────────────── */
+.profile-id { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 12px; }
+.profile-avatar {
+  width: 46px; height: 46px;
+  border-radius: 50%;
+  border: 1px solid var(--chalk-25);
+  flex: none;
+}
+.profile-avatar.fallback { background: var(--chalk-12); display: inline-block; }
+.profile-shown {
+  margin: 0 0 2px;
+  font-family: var(--display);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 20px;
+}
+.profile-hint { margin: 6px 0 0; font-size: 12px; color: var(--red); }

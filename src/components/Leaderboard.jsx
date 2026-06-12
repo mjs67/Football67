@@ -55,7 +55,7 @@ export default function Leaderboard({ me }) {
             ) : (
               <span className="who-fallback" aria-hidden="true" />
             )}
-            {r.displayName || "Anonymous"}
+            {r.nickname || r.displayName || "Anonymous"}
           </span>
           <span className="stat">{r.exact ?? 0}</span>
           <span className="stat">{r.results ?? 0}</span>
