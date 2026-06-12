@@ -94,12 +94,44 @@ function strength(team) {
 }
 
 const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
+
+// ── Squad-strength prior (scripts/teamRatings.json) ──
+// Elo-style ratings give the model a sensible opinion before any results
+// exist; observed tournament data takes over as matches are played.
+let ratings = {};
+try {
+  ratings = JSON.parse(
+    readFileSync(new URL("./teamRatings.json", import.meta.url), "utf8")
+  );
+} catch {
+  console.log("No scripts/teamRatings.json found — odds will use match data only.");
+}
+const DEFAULT_RATING = 1600;
+const missingRatings = new Set();
+function ratingOf(team) {
+  if (Object.prototype.hasOwnProperty.call(ratings, team)) return ratings[team];
+  if (Object.keys(ratings).length > 0) missingRatings.add(team);
+  return DEFAULT_RATING;
+}
+
 function expectedGoals(home, away) {
   const H = strength(home), A = strength(away);
+  // Data-driven estimate (form so far this competition/season)
+  const dataLh = gHome * H.att * A.def;
+  const dataLa = gAway * A.att * H.def;
+  // Ratings-driven prior: Elo gap → goal expectancy split
+  // (~200-point gap ≈ a 70/30 matchup; +60 home bonus outside neutral venues)
+  const diff = ratingOf(home) - ratingOf(away) + (NEUTRAL_VENUE ? 0 : 60);
+  const priorLh = gHome * Math.exp(0.002 * diff);
+  const priorLa = gAway * Math.exp(-0.002 * diff);
+  // Blend: weight shifts from ratings to real results as teams play
+  // (each team ~4 matches in → 50/50; ~8 in → two-thirds data)
+  const n = H.n + A.n;
+  const w = Object.keys(ratings).length > 0 ? n / (n + 8) : 1;
   return {
-    lh: Number(clamp(gHome * H.att * A.def, 0.25, 3.6).toFixed(3)),
-    la: Number(clamp(gAway * A.att * H.def, 0.25, 3.6).toFixed(3)),
-    n: H.n + A.n, // how much data the estimate rests on
+    lh: Number(clamp(w * dataLh + (1 - w) * priorLh, 0.25, 3.6).toFixed(3)),
+    la: Number(clamp(w * dataLa + (1 - w) * priorLa, 0.25, 3.6).toFixed(3)),
+    n,
   };
 }
 
@@ -169,6 +201,12 @@ for (const m of data.matches) {
 }
 await batch.commit();
 console.log(`Upserted ${writes} matches (${settled} finished).`);
+if (missingRatings.size > 0) {
+  console.log(
+    `No rating found for: ${[...missingRatings].join(", ")} — used default ${DEFAULT_RATING}. ` +
+    "Add them to scripts/teamRatings.json (use these exact names)."
+  );
+}
 
 // ── Auto-pick safety net ──
 // Players with autoPickOn get a default 1–1 lodged for any match kicking off
