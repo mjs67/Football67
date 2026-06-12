@@ -1,0 +1,115 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Fixtures: public read; written only by the sync/admin scripts (Admin SDK)
+    match /matches/{matchId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Predictions: doc id must be "<uid>_<matchId>", owner-only,
+    // valid scores, and only while the match hasn't kicked off
+    match /predictions/{predId} {
+      allow read: if request.auth != null && resource.data.uid == request.auth.uid;
+      allow create, update: if request.auth != null
+        && predId == request.auth.uid + '_' + request.resource.data.matchId
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.home is int
+        && request.resource.data.away is int
+        && request.resource.data.home >= 0 && request.resource.data.home <= 15
+        && request.resource.data.away >= 0 && request.resource.data.away <= 15
+        && get(/databases/$(database)/documents/matches/$(request.resource.data.matchId)).data.status == 'upcoming'
+        && get(/databases/$(database)/documents/matches/$(request.resource.data.matchId)).data.kickoff > request.time;
+      allow delete: if false;
+    }
+
+    // Leaderboard rows: public read. Players may only touch their own
+    // profile fields — points/exact/results/tbDistance are script-only.
+    match /users/{uid} {
+      allow read: if true;
+      allow create: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['displayName', 'photoURL', 'email', 'remindersOn', 'autoPickOn']);
+      allow update: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['displayName', 'photoURL', 'email', 'remindersOn', 'autoPickOn']);
+      allow delete: if false;
+    }
+
+    // Private leagues. Read requires sign-in. Create: you are the owner and
+    // sole first member. Update: the owner can manage the league, or a
+    // signed-in player can add/remove exactly themselves (join/leave).
+    match /groups/{gid} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.members == [request.auth.uid]
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 40
+        && request.resource.data.code is string
+        && request.resource.data.code.size() == 6;
+      allow update: if request.auth != null
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.code == resource.data.code
+        && request.resource.data.members.size() <= 50
+        && (
+          resource.data.ownerUid == request.auth.uid
+          || (
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members'])
+            && (
+              // join: new = old + [me]
+              (request.resource.data.members.toSet()
+                 .difference(resource.data.members.toSet()) == [request.auth.uid].toSet()
+               && resource.data.members.toSet()
+                 .difference(request.resource.data.members.toSet()).size() == 0)
+              ||
+              // leave: new = old - [me]
+              (resource.data.members.toSet()
+                 .difference(request.resource.data.members.toSet()) == [request.auth.uid].toSet()
+               && request.resource.data.members.toSet()
+                 .difference(resource.data.members.toSet()).size() == 0)
+            )
+          )
+        );
+      allow delete: if request.auth != null && resource.data.ownerUid == request.auth.uid;
+    }
+
+    // Tiebreaker question/answer: public read, script-only write
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Tiebreaker guesses: owner-only, locked once the answer is published
+    match /tiebreakers/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.uid == uid
+        && request.resource.data.value is int
+        && request.resource.data.value >= 0
+        && request.resource.data.value <= 500
+        && get(/databases/$(database)/documents/settings/tiebreaker).data.answer == null;
+      allow delete: if false;
+    }
+
+    // Knockout bracket picks: owner-only, locked at the bracket deadline
+    match /brackets/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['picks', 'updatedAt'])
+        && request.resource.data.picks is map
+        && request.time < get(/databases/$(database)/documents/settings/bracket).data.deadline;
+      allow delete: if false;
+    }
+
+    // Reminder bookkeeping: script-only
+    match /reminders/{id} {
+      allow read, write: if false;
+    }
+  }
+}
