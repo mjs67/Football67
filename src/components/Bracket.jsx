@@ -6,6 +6,7 @@ const ROUND_NAMES = {
   4: ["Semi-finals", "Final"],
   8: ["Quarter-finals", "Semi-finals", "Final"],
   16: ["Round of 16", "Quarter-finals", "Semi-finals", "Final"],
+  32: ["Round of 32", "Round of 16", "Quarter-finals", "Semi-finals", "Final"],
 };
 
 export default function Bracket({ user, onRequireSignIn }) {

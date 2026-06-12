@@ -18,6 +18,7 @@ A FIFA-style match predictor: sign in with Google, lock in a scoreline for every
 - **Email reminders**: opt-in toggle; a digest email goes out when matches you haven't predicted kick off within 24h (each match reminded only once)
 - **Tiebreaker question** (e.g. "Total goals in the tournament?"): players submit a number, leaderboard ties are broken by closest guess once you publish the answer
 - **Knockout bracket predictor**: pick winners through the whole tree (4/8/16 teams) before the round-of-16 kicks off; escalating points per round (e.g. 2/4/6/10) land automatically as real winners are recorded, folded into the main leaderboard
+- **Win & exact-score odds on every card**: a built-in Poisson expected-goals model (attack/defence strength vs competition average, shrunk toward neutral early on) shows win/draw/win percentages, the most likely scoreline, and the live probability of *your* scoreline as you adjust it — plus a "% CALL" boldness tag on share cards. No betting API, no cost; it recomputes every sync and sharpens as results come in
 - **Pre-match stats on every card**: last-5 form pips (W/D/L) for both teams plus season head-to-head, computed automatically from the same API sync — no extra API calls
 - **Shareable pick cards**: one tap renders a branded 1080×1350 image of your picks (with verdicts on settled ones) and opens the native share sheet — or downloads the PNG on desktop
 - **Form graph & accuracy profile**: cumulative points sparkline (amber dots = exact scores) plus your hit-rate across all settled picks
@@ -53,7 +54,7 @@ Download a service-account key (**Project settings → Service accounts → Gene
 
 1. Get a **free API key**: https://www.football-data.org/client/register
 2. Pick a competition code: `PL` Premier League · `WC` World Cup · `CL` Champions League · `EC` Euros · `PD` La Liga · `BL1` Bundesliga · `SA` Serie A
-3. First import:
+3. First import (for the 2026 World Cup use `COMPETITION=WC` — the 45-day window and neutral-venue model are applied automatically):
 
 ```bash
 FOOTBALL_DATA_TOKEN=your_key COMPETITION=PL npm run sync
@@ -99,7 +100,7 @@ node scripts/bracket.js result r0-2 "Spain"     # match ids shown by `status`
 node scripts/bracket.js status
 ```
 
-Per-round points: 16 teams → 2/4/6/10 · 8 teams → 3/6/10 · 4 teams → 4/10.
+Per-round points: 32 teams (World Cup round of 32) → 1/2/4/6/10 · 16 → 2/4/6/10 · 8 → 3/6/10 · 4 → 4/10.
 
 ## 7. Tiebreaker
 

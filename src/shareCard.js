@@ -1,5 +1,7 @@
 // Renders a shareable 1080×1350 image of the player's picks on a canvas,
 // then shares it via the Web Share API (falls back to a PNG download).
+import { pct, scoreP } from "./poisson.js";
+
 const W = 1080;
 const H = 1350;
 
@@ -117,11 +119,11 @@ export async function sharePickCard({ user, matches, predictions }) {
     } else {
       ctx.fillStyle = C.chalk25;
       const ko = m.kickoff?.toDate?.();
-      ctx.fillText(
-        ko ? ko.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "",
-        W - pad - 18,
-        cy
-      );
+      const when = ko
+        ? ko.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+        : "";
+      const bold = m.odds ? `${pct(scoreP(m.odds.lh, m.odds.la, p.home, p.away))}% CALL · ` : "";
+      ctx.fillText(bold + when, W - pad - 18, cy);
     }
   });
 

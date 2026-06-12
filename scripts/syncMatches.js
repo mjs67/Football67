@@ -27,7 +27,8 @@ if (!TOKEN) {
   process.exit(1);
 }
 const COMP = process.env.COMPETITION || "PL";
-const DAYS_AHEAD = Number(process.env.DAYS_AHEAD || 14);
+const NEUTRAL_VENUE = ["WC", "EC"].includes(COMP); // tournaments at neutral grounds
+const DAYS_AHEAD = Number(process.env.DAYS_AHEAD || (NEUTRAL_VENUE ? 45 : 14));
 
 // One call for the whole season: powers fixtures AND form/H2H stats
 const url = `https://api.football-data.org/v4/competitions/${COMP}/matches`;
@@ -55,6 +56,52 @@ for (const m of finishedSeason) {
   else { push(h, "D"); push(a, "D"); }
 }
 const lastFive = (t) => (formMap.get(t) || []).slice(-5).join("");
+
+// ── Poisson expected-goals model (powers the odds on every card) ──
+// Attack/defence strength per team relative to the competition average,
+// shrunk toward neutral when a team has few matches (k=5), so the model
+// starts humble on day one of a tournament and sharpens as results land.
+const teamStats = new Map(); // team -> {gf, ga, n}
+let goalsHomeSide = 0, goalsAwaySide = 0;
+for (const m of finishedSeason) {
+  const h = teamName(m.homeTeam), a = teamName(m.awayTeam);
+  const hs = m.score.fullTime.home, as = m.score.fullTime.away;
+  goalsHomeSide += hs;
+  goalsAwaySide += as;
+  const th = teamStats.get(h) || { gf: 0, ga: 0, n: 0 };
+  th.gf += hs; th.ga += as; th.n += 1;
+  teamStats.set(h, th);
+  const ta = teamStats.get(a) || { gf: 0, ga: 0, n: 0 };
+  ta.gf += as; ta.ga += hs; ta.n += 1;
+  teamStats.set(a, ta);
+}
+const N = finishedSeason.length;
+// Baseline goals per side per match (sane defaults until results exist)
+let gHome = N >= 10 ? goalsHomeSide / N : 1.45;
+let gAway = N >= 10 ? goalsAwaySide / N : 1.15;
+if (NEUTRAL_VENUE) gHome = gAway = N >= 10 ? (goalsHomeSide + goalsAwaySide) / (2 * N) : 1.3;
+const gAvg = (gHome + gAway) / 2;
+
+function strength(team) {
+  const s = teamStats.get(team);
+  if (!s || s.n === 0) return { att: 1, def: 1, n: 0 };
+  const w = s.n / (s.n + 5);
+  return {
+    att: w * (s.gf / s.n / gAvg) + (1 - w),
+    def: w * (s.ga / s.n / gAvg) + (1 - w),
+    n: s.n,
+  };
+}
+
+const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
+function expectedGoals(home, away) {
+  const H = strength(home), A = strength(away);
+  return {
+    lh: Number(clamp(gHome * H.att * A.def, 0.25, 3.6).toFixed(3)),
+    la: Number(clamp(gAway * A.att * H.def, 0.25, 3.6).toFixed(3)),
+    n: H.n + A.n, // how much data the estimate rests on
+  };
+}
 
 function h2h(home, away) {
   let homeWins = 0, draws = 0, awayWins = 0;
@@ -108,6 +155,10 @@ for (const m of data.matches) {
       homeForm: lastFive(m.homeTeam.shortName || m.homeTeam.name),
       awayForm: lastFive(m.awayTeam.shortName || m.awayTeam.name),
       h2h: h2h(m.homeTeam.shortName || m.homeTeam.name, m.awayTeam.shortName || m.awayTeam.name),
+      odds: expectedGoals(
+        m.homeTeam.shortName || m.homeTeam.name,
+        m.awayTeam.shortName || m.awayTeam.name
+      ),
     },
     { merge: true }
   );

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 import { db } from "../firebase.js";
+import { matchProbs, pct, scoreP } from "../poisson.js";
 
 function pad(n) {
   return String(n).padStart(2, "0");
@@ -131,6 +132,10 @@ export default function MatchCard({ match, user, prediction, onRequireSignIn }) 
         <Team name={match.away} flag={match.awayFlag} side="away" />
       </div>
 
+      {match.odds && match.status !== "finished" && (
+        <OddsStrip odds={match.odds} home={home} away={away} locked={locked} />
+      )}
+
       {(match.homeForm || match.awayForm || match.h2h) && match.status !== "finished" && (
         <div className="form-row">
           <FormPips form={match.homeForm} align="left" />
@@ -182,6 +187,33 @@ export default function MatchCard({ match, user, prediction, onRequireSignIn }) 
         )}
       </div>
     </article>
+  );
+}
+
+function OddsStrip({ odds, home, away, locked }) {
+  const { ph, pd, pa, top } = matchProbs(odds.lh, odds.la);
+  const yourP = scoreP(odds.lh, odds.la, home, away);
+  return (
+    <div className="odds-strip">
+      <div
+        className="odds-bar"
+        role="img"
+        aria-label={`Model win probabilities: home ${pct(ph)} percent, draw ${pct(pd)} percent, away ${pct(pa)} percent`}
+      >
+        <span className="seg home" style={{ flexGrow: ph }}>{pct(ph)}%</span>
+        <span className="seg draw" style={{ flexGrow: pd }}>{pct(pd)}%</span>
+        <span className="seg away" style={{ flexGrow: pa }}>{pct(pa)}%</span>
+      </div>
+      <p className="odds-note">
+        Model: most likely {top.h}–{top.a} ({pct(top.p)}%)
+        {!locked && (
+          <>
+            {" "}· your call {home}–{away} ({pct(yourP)}%)
+          </>
+        )}
+        {odds.n < 6 && <span className="odds-early"> · early-tournament estimate</span>}
+      </p>
+    </div>
   );
 }
 

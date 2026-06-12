@@ -1,6 +1,6 @@
 // Manage the knockout bracket predictor.
 //
-// Create (4, 8 or 16 teams, listed in bracket order — pair 1 vs 2, 3 vs 4, …):
+// Create (4, 8, 16 or 32 teams, listed in bracket order — pair 1 vs 2, 3 vs 4, …):
 //   node scripts/bracket.js create --deadline 2026-06-28T16:00:00Z \
 //     "France,Argentina,Brazil,England,Spain,Germany,Portugal,Netherlands"
 //
@@ -29,7 +29,7 @@ const args = process.argv.slice(2);
 const cmd = args[0];
 
 // Points per correct pick, by bracket size and round
-const POINTS = { 4: [4, 10], 8: [3, 6, 10], 16: [2, 4, 6, 10] };
+const POINTS = { 4: [4, 10], 8: [3, 6, 10], 16: [2, 4, 6, 10], 32: [1, 2, 4, 6, 10] };
 
 if (cmd === "create") {
   const dlIdx = args.indexOf("--deadline");
@@ -37,8 +37,8 @@ if (cmd === "create") {
   const teamsArg = args.filter((a, i) => i > 0 && a !== "--deadline" && i !== dlIdx + 1).join(" ");
   const teams = teamsArg.split(",").map((t) => t.trim()).filter(Boolean);
 
-  if (![4, 8, 16].includes(teams.length)) {
-    console.error(`Need exactly 4, 8 or 16 teams (got ${teams.length}).`);
+  if (![4, 8, 16, 32].includes(teams.length)) {
+    console.error(`Need exactly 4, 8, 16 or 32 teams (got ${teams.length}).`);
     process.exit(1);
   }
   if (!deadline || isNaN(deadline)) {
