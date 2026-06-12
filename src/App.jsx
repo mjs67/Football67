@@ -210,7 +210,7 @@ export default function App() {
 
         {tab === "bracket" && <Bracket user={user} onRequireSignIn={handleSignIn} />}
 
-        {tab === "groups" && <Groups user={user} onRequireSignIn={handleSignIn} />}
+        {tab === "groups" && <Groups user={user} matches={matches} onRequireSignIn={handleSignIn} />}
 
         {tab === "table" && <Leaderboard me={user} />}
       </main>

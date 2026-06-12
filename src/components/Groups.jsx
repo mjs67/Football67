@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   addDoc,
   arrayRemove,
@@ -20,7 +20,7 @@ const CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const makeCode = () =>
   Array.from({ length: 6 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join("");
 
-export default function Groups({ user, onRequireSignIn }) {
+export default function Groups({ user, matches = [], onRequireSignIn }) {
   const [groups, setGroups] = useState(null);
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
@@ -143,13 +143,13 @@ export default function Groups({ user, onRequireSignIn }) {
         </p>
       )}
       {groups?.map((g) => (
-        <GroupTable key={g.id} group={g} me={user} />
+        <GroupTable key={g.id} group={g} me={user} matches={matches} />
       ))}
     </>
   );
 }
 
-function GroupTable({ group, me }) {
+function GroupTable({ group, me, matches }) {
   const [rows, setRows] = useState(null);
   const [copied, setCopied] = useState(false);
 
@@ -222,6 +222,7 @@ function GroupTable({ group, me }) {
       {rows === null ? (
         <p className="empty">Loading standings…</p>
       ) : (
+        <>
         <ol className="ladder">
           {rows.map((r, i) => (
             <li key={r.id} className={"ladder-row" + (r.id === me.uid ? " me" : "")}>
@@ -241,7 +242,99 @@ function GroupTable({ group, me }) {
             </li>
           ))}
         </ol>
+        <RevealedPicks group={group} members={rows} matches={matches} />
+        </>
       )}
     </section>
+  );
+}
+
+function revealPoints(pred, match) {
+  if (!pred || match.status !== "finished") return null;
+  if (pred.home === match.homeScore && pred.away === match.awayScore) return 5;
+  if (Math.sign(pred.home - pred.away) === Math.sign(match.homeScore - match.awayScore))
+    return 3;
+  return 0;
+}
+
+function RevealedPicks({ group, members, matches }) {
+  // Most recent matches that have kicked off (live or finished)
+  const kicked = useMemo(
+    () =>
+      matches
+        .filter((m) => m.kickoff?.toMillis && m.kickoff.toMillis() <= Date.now())
+        .sort((a, b) => b.kickoff.toMillis() - a.kickoff.toMillis())
+        .slice(0, 3),
+    [matches]
+  );
+
+  const [picks, setPicks] = useState(null); // matchId -> Map(uid -> pred)
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      const out = {};
+      for (const m of kicked) {
+        try {
+          const snap = await getDocs(
+            query(collection(db, "predictions"), where("matchId", "==", m.id))
+          );
+          out[m.id] = new Map(snap.docs.map((d) => [d.data().uid, d.data()]));
+        } catch {
+          out[m.id] = null; // not revealable yet (clock skew right at kickoff)
+        }
+      }
+      if (!cancelled) setPicks(out);
+    }
+    if (kicked.length > 0) load();
+    else setPicks({});
+    return () => {
+      cancelled = true;
+    };
+  }, [kicked, group.id]);
+
+  if (kicked.length === 0 || picks === null) return null;
+
+  const memberIds = new Set((group.members || []).slice(0, 50));
+  const named = members.filter((r) => memberIds.has(r.id));
+
+  return (
+    <div className="reveal">
+      <h4 className="reveal-title">Locked-in picks <span>revealed at kickoff</span></h4>
+      {kicked.map((m) => {
+        const byUid = picks[m.id];
+        return (
+          <div className="reveal-match" key={m.id}>
+            <p className="reveal-head">
+              <b>{m.home}</b> v <b>{m.away}</b>
+              {m.status === "finished" ? (
+                <span className="reveal-ft"> FT {m.homeScore}–{m.awayScore}</span>
+              ) : (
+                <span className="reveal-live"> ● Live</span>
+              )}
+            </p>
+            <div className="reveal-chips">
+              {named.map((r) => {
+                const p = byUid?.get(r.id);
+                const pts = p ? revealPoints(p, m) : null;
+                return (
+                  <span
+                    className={
+                      "reveal-chip" +
+                      (pts === 5 ? " gold" : pts === 3 ? " ok" : pts === 0 ? " zero" : "")
+                    }
+                    key={r.id}
+                  >
+                    {(r.nickname || r.displayName || "Anon").split(" ")[0]}
+                    <b>{p ? `${p.home}–${p.away}` : "—"}</b>
+                    {pts !== null && <i>+{pts}</i>}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }

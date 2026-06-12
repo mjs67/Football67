@@ -728,3 +728,50 @@ code {
   font-size: 20px;
 }
 .profile-hint { margin: 6px 0 0; font-size: 12px; color: var(--red); }
+
+/* ── League pick reveal (after kickoff) ────────────────────── */
+.reveal { margin-top: 14px; }
+.reveal-title {
+  margin: 0 0 8px;
+  font-family: var(--display);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--chalk-60);
+}
+.reveal-title span { color: var(--chalk-25); font-size: 11px; letter-spacing: 0.06em; }
+.reveal-match {
+  background: var(--pitch);
+  border: 1px solid var(--chalk-12);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 6px;
+}
+.reveal-head { margin: 0 0 8px; font-size: 13px; color: var(--chalk-60); }
+.reveal-head b { color: var(--chalk); font-family: var(--display); text-transform: uppercase; letter-spacing: 0.04em; }
+.reveal-ft { color: var(--volt); font-family: var(--numeral); font-variant-numeric: tabular-nums; }
+.reveal-live { color: var(--red); font-size: 12px; }
+.reveal-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.reveal-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--pitch-deep);
+  border: 1px solid var(--chalk-12);
+  border-radius: 6px;
+  padding: 4px 9px;
+  font-size: 12px;
+  color: var(--chalk-60);
+}
+.reveal-chip b {
+  font-family: var(--numeral);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--chalk);
+}
+.reveal-chip i { font-style: normal; font-family: var(--numeral); font-size: 11px; font-weight: 700; }
+.reveal-chip.gold { border-color: var(--volt); }
+.reveal-chip.gold b, .reveal-chip.gold i { color: var(--volt); }
+.reveal-chip.ok i { color: var(--chalk); }
+.reveal-chip.zero i { color: var(--chalk-25); }

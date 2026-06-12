@@ -11,7 +11,12 @@ service cloud.firestore {
     // Predictions: doc id must be "<uid>_<matchId>", owner-only,
     // valid scores, and only while the match hasn't kicked off
     match /predictions/{predId} {
-      allow read: if request.auth != null && resource.data.uid == request.auth.uid;
+      // Private before kickoff (no copying the leader's homework);
+      // revealed to signed-in players once the match has started.
+      allow read: if request.auth != null && (
+        resource.data.uid == request.auth.uid
+        || get(/databases/$(database)/documents/matches/$(resource.data.matchId)).data.kickoff < request.time
+      );
       allow create, update: if request.auth != null
         && predId == request.auth.uid + '_' + request.resource.data.matchId
         && request.resource.data.uid == request.auth.uid
