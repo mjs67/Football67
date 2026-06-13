@@ -157,6 +157,41 @@ data.matches = data.matches.filter((m) => {
 });
 console.log(`${data.matches.length} matches inside the ${DAYS_AHEAD}-day window.`);
 
+// Human label for where a match sits in the competition
+const STAGE_NAMES = {
+  LAST_32: "Round of 32",
+  LAST_16: "Round of 16",
+  QUARTER_FINALS: "Quarter-finals",
+  SEMI_FINALS: "Semi-finals",
+  THIRD_PLACE: "Third place",
+  FINAL: "Final",
+};
+function stageLabel(m) {
+  if (m.group) return m.group.replace("GROUP_", "Group ");
+  if (STAGE_NAMES[m.stage]) return STAGE_NAMES[m.stage];
+  return "";
+}
+
+// Venue lookup: stadium keyword → "City, Country" (scripts/venues.json)
+let venuePlaces = {};
+try {
+  venuePlaces = JSON.parse(
+    readFileSync(new URL("./venues.json", import.meta.url), "utf8")
+  );
+} catch {
+  /* optional file */
+}
+function venueLabel(m) {
+  if (!m.venue) return null;
+  const lower = m.venue.toLowerCase();
+  for (const [keyword, place] of Object.entries(venuePlaces)) {
+    if (keyword.startsWith("_")) continue;
+    if (lower.includes(keyword)) return `${m.venue} · ${place}`;
+  }
+  return m.venue;
+}
+const compName = (data.competition?.name || COMP).replace(/^FIFA /, "");
+
 let batch = db.batch();
 let writes = 0;
 let settled = 0;
@@ -176,9 +211,8 @@ for (const m of data.matches) {
       away: m.awayTeam.shortName || m.awayTeam.name,
       homeFlag: m.homeTeam.crest || "⚽",
       awayFlag: m.awayTeam.crest || "⚽",
-      competition:
-        (data.competition?.name || COMP) +
-        (m.matchday ? ` · MD ${m.matchday}` : ""),
+      competition: stageLabel(m) ? `${compName} · ${stageLabel(m)}` : compName,
+      venue: venueLabel(m),
       kickoff: admin.firestore.Timestamp.fromDate(new Date(m.utcDate)),
       status: finished ? "finished" : "upcoming",
       live,

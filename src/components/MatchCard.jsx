@@ -110,6 +110,8 @@ export default function MatchCard({ match, user, prediction, onRequireSignIn }) 
         </span>
       </div>
 
+      {match.venue && <p className="venue">{match.venue}</p>}
+
       <div className="board">
         <Team name={match.home} flag={match.homeFlag} side="home" />
 

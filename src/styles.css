@@ -775,3 +775,33 @@ code {
 .reveal-chip.gold b, .reveal-chip.gold i { color: var(--volt); }
 .reveal-chip.ok i { color: var(--chalk); }
 .reveal-chip.zero i { color: var(--chalk-25); }
+
+/* ── Mobile navigation fix ─────────────────────────────────── */
+/* The page itself never scrolls sideways… */
+html, body { overflow-x: hidden; }
+
+/* …the tab bar swipes within itself instead */
+.tabs {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar { display: none; }
+.tab { flex: none; white-space: nowrap; }
+
+/* Card meta can wrap instead of pushing the card wider */
+.card-meta { flex-wrap: wrap; gap: 4px 10px; }
+
+@media (max-width: 560px) {
+  .tab { font-size: 14px; padding: 8px 10px; }
+  .card-meta { font-size: 11px; }
+}
+
+/* ── Venue line ────────────────────────────────────────────── */
+.venue {
+  margin: -6px 0 10px;
+  text-align: center;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--chalk-25);
+}
