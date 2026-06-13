@@ -1,20 +1,21 @@
 # Free automation via GitHub Actions (no Cloud Functions / Blaze plan needed).
 #
-# Repo secrets to add (Settings → Secrets and variables → Actions):
+# Repo secrets required (Settings → Secrets and variables → Actions):
 #   FIREBASE_SERVICE_ACCOUNT   the full JSON of your service account key
 #   FOOTBALL_DATA_TOKEN        free key from football-data.org
-#   SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS / MAIL_FROM   (for reminders)
-#   APP_URL                    your site URL, used in reminder emails
 #
 # Repo variable (optional):
-#   COMPETITION                e.g. PL, WC, CL, EC, PD, BL1, SA  (default PL)
+#   COMPETITION                e.g. WC, PL, CL, EC, PD, BL1, SA  (default PL)
 
 name: automation
 
+# Run JS actions on Node 24 (silences the Node 20 deprecation warning)
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 on:
   schedule:
-    - cron: "*/30 * * * *" # sync results + leaderboard every 30 min
-    - cron: "0 * * * *"    # reminder emails hourly
+    - cron: "*/30 * * * *" # sync fixtures, results, odds + leaderboard every 30 min
   workflow_dispatch: {}     # run manually from the Actions tab
 
 jobs:
@@ -33,13 +34,3 @@ jobs:
           FOOTBALL_DATA_TOKEN: ${{ secrets.FOOTBALL_DATA_TOKEN }}
           COMPETITION: ${{ vars.COMPETITION }}
         run: node scripts/syncMatches.js
-      - name: Send kickoff reminders (hourly runs only)
-        if: github.event.schedule == '0 * * * *' || github.event_name == 'workflow_dispatch'
-        env:
-          SMTP_HOST: ${{ secrets.SMTP_HOST }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}
-          SMTP_USER: ${{ secrets.SMTP_USER }}
-          SMTP_PASS: ${{ secrets.SMTP_PASS }}
-          MAIL_FROM: ${{ secrets.MAIL_FROM }}
-          APP_URL: ${{ secrets.APP_URL }}
-        run: node scripts/sendReminders.js

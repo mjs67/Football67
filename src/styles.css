@@ -280,19 +280,40 @@ body {
 .dash { color: var(--chalk-25); font-size: 26px; padding: 0 4px; }
 .final, .steppers { display: flex; align-items: center; gap: 6px; }
 
-.stepper { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.stepper { display: flex; flex-direction: column; align-items: center; gap: 5px; }
 .tick {
-  background: none;
-  border: none;
-  color: var(--chalk-60);
-  font-size: 11px;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 26px;
+  background: var(--pitch);
+  border: 1px solid var(--chalk-25);
+  color: var(--chalk);
+  font-size: 12px;
+  line-height: 1;
   cursor: pointer;
-  padding: 3px 10px;
-  border-radius: 4px;
+  padding: 0;
+  border-radius: 6px;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
-.tick:hover:not(:disabled) { color: var(--volt); background: var(--chalk-12); }
-.tick:disabled { opacity: 0.25; cursor: default; }
-.tick:focus-visible { outline: 2px solid var(--volt); }
+.tick:hover:not(:disabled) {
+  color: var(--volt-ink);
+  background: var(--volt);
+  border-color: var(--volt);
+}
+.tick:active:not(:disabled) { transform: translateY(1px); }
+.tick:disabled { opacity: 0.3; cursor: default; }
+.tick:focus-visible { outline: 2px solid var(--volt); outline-offset: 2px; }
+
+@media (max-width: 560px) {
+  .tick { width: 40px; height: 30px; font-size: 13px; }
+  .stepper { gap: 6px; }
+}
+
+/* Bigger touch target than the visible button on touch devices */
+@media (hover: none) {
+  .tick { width: 44px; height: 34px; }
+}
 
 .card-foot { margin-top: 14px; display: flex; justify-content: center; }
 .verdict { font-size: 14px; color: var(--chalk-60); }
