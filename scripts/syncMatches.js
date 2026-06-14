@@ -168,8 +168,10 @@ function h2h(home, away) {
   return homeWins + draws + awayWins > 0 ? { homeWins, draws, awayWins } : null;
 }
 
-// Only upsert matches inside the rolling window (recent results + near future)
-const from = Date.now() - 3 * 86400000;
+// Only upsert matches inside the rolling window (recent results + near future).
+// Look-back is generous (DAYS_AHEAD, or 21 days min) so finished matches are
+// always rewritten with their final scores even if an earlier sync was missed.
+const from = Date.now() - Math.max(DAYS_AHEAD, 21) * 86400000;
 const to = Date.now() + DAYS_AHEAD * 86400000;
 data.matches = data.matches.filter((m) => {
   const t = new Date(m.utcDate).getTime();
