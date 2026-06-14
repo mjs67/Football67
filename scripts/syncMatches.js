@@ -32,11 +32,31 @@ const DAYS_AHEAD = Number(process.env.DAYS_AHEAD || (NEUTRAL_VENUE ? 45 : 14));
 
 // One call for the whole season: powers fixtures AND form/H2H stats
 const url = `https://api.football-data.org/v4/competitions/${COMP}/matches`;
-const res = await fetch(url, { headers: { "X-Auth-Token": TOKEN } });
-if (!res.ok) {
-  console.error(`football-data.org responded ${res.status}: ${await res.text()}`);
-  process.exit(1);
+
+// Retry transient network failures (dropped sockets, brief 429/5xx) with
+// exponential backoff before giving up — flaky connections shouldn't fail a run.
+async function fetchWithRetry(u, opts, tries = 4) {
+  for (let attempt = 1; attempt <= tries; attempt++) {
+    try {
+      const r = await fetch(u, opts);
+      if (r.ok) return r;
+      // Retry rate-limits and server errors; fail fast on auth/client errors
+      if (r.status === 429 || r.status >= 500) throw new Error(`HTTP ${r.status}`);
+      console.error(`football-data.org responded ${r.status}: ${await r.text()}`);
+      process.exit(1);
+    } catch (e) {
+      if (attempt === tries) {
+        console.error(`Fetch failed after ${tries} attempts: ${e.message}`);
+        process.exit(1);
+      }
+      const waitMs = 3000 * attempt;
+      console.log(`Attempt ${attempt} failed (${e.message}); retrying in ${waitMs / 1000}s…`);
+      await new Promise((res) => setTimeout(res, waitMs));
+    }
+  }
 }
+
+const res = await fetchWithRetry(url, { headers: { "X-Auth-Token": TOKEN } });
 const data = await res.json();
 console.log(`Fetched ${data.matches.length} season matches for ${COMP}.`);
 
