@@ -1,6 +1,6 @@
 # Football67 — Match Predictor (www.football67.com)
 
-A FIFA-style match predictor: sign in with Google, lock in a scoreline for every fixture before kickoff, and climb the leaderboard — with **live results pulled automatically from a real football API**, a knockout bracket, private leagues, shareable pick cards, email reminders, auto-pick protection, and a tiebreaker.
+A FIFA-style match predictor: sign in with Google, lock in a scoreline for every fixture before kickoff, and climb the leaderboard — with **live results pulled automatically from a real football API**, a knockout bracket, private leagues, shareable pick cards, auto-pick protection, and a tiebreaker.
 
 **Stack:** React + Vite · Firebase Auth (Google) · Firestore · Firebase Hosting or Vercel · football-data.org · GitHub Actions automation · your own domain.
 
@@ -15,14 +15,14 @@ A FIFA-style match predictor: sign in with Google, lock in a scoreline for every
 - **Predictions** with scoreboard-style steppers, live kickoff countdowns, and a hard server-side deadline at kickoff
 - **My Picks** page: points/exact/results stats, full prediction history with earned points per match
 - **Leagues**: create a private league, share a 6-character invite code, friends join instantly; per-league standings with captain badge, copy-code and leave buttons (50 players max)
-- **Email reminders**: opt-in toggle; a digest email goes out when matches you haven't predicted kick off within 24h (each match reminded only once)
+- **Profile**: nickname editor lives at the top of the page next to Sign in / Sign out (click your avatar) — sets the name shown on leaderboards and leagues
 - **Tiebreaker question** (e.g. "Total goals in the tournament?"): players submit a number, leaderboard ties are broken by closest guess once you publish the answer
 - **Knockout bracket predictor**: pick winners through the whole tree (4/8/16 teams) before the round-of-16 kicks off; escalating points per round (e.g. 2/4/6/10) land automatically as real winners are recorded, folded into the main leaderboard
 - **Win & exact-score odds on every card**: a built-in Poisson expected-goals model (attack/defence strength vs competition average, shrunk toward neutral early on) shows win/draw/win percentages, the most likely scoreline, and the live probability of *your* scoreline as you adjust it — plus a "% CALL" boldness tag on share cards. No betting API, no cost; it recomputes every sync and sharpens as results come in
 - **Pre-match stats on every card**: last-5 form pips (W/D/L) for both teams plus season head-to-head, computed automatically from the same API sync — no extra API calls
 - **Shareable pick cards**: one tap renders a branded 1080×1350 image of your picks (with verdicts on settled ones) and opens the native share sheet — or downloads the PNG on desktop
 - **Form graph & accuracy profile**: cumulative points sparkline (amber dots = exact scores) plus your hit-rate across all settled picks
-- **Auto-pick safety net**: opt-in toggle; if you forget a match, a default 1–1 is lodged for you just before kickoff (tagged "auto-pick" in your history)
+- **Auto-pick safety net**: ON by default for every new player (toggle stays in My Picks if someone wants to turn it off); if you forget a match, a default 1–1 is lodged for you just before kickoff (tagged "auto-pick" in your history)
 - **Tamper-proof leaderboard**: Firestore rules block clients from ever writing points
 
 ## 1. Create the Firebase project (~5 min)
@@ -75,14 +75,12 @@ And a repo **variable** `COMPETITION` (e.g. `PL`). You can also trigger a run ma
 
 Prefer made-up fixtures instead of a real competition? `npm run seed` still works, and `npm run settle` lets you enter scores by hand.
 
-## 5. Email reminders
+## 5. Email reminders (legacy / manual only)
 
-Reminders are sent by `scripts/sendReminders.js` (hourly via the same workflow). Any SMTP service works:
+The "Email reminders" toggle has been removed from **My Picks** — there's no longer a way for players to opt in from the UI. Worth knowing: `automation.yml` only runs `syncMatches.js` on its schedule, so `scripts/sendReminders.js` isn't actually being triggered automatically right now even for the field's old name — if you want reminder emails again in the future, you'd need to both re-add a UI toggle and add a step/schedule for `npm run remind` to the workflow. Any SMTP service works if you do:
 
 - **Gmail**: host `smtp.gmail.com`, port `587`, user = your address, pass = an App Password (https://myaccount.google.com/apppasswords)
 - **Brevo / Resend / Mailgun** free tiers all provide SMTP credentials
-
-Players opt in with the toggle on their **My Picks** page; their Google email is used. Each player gets at most one email per match, only for matches they haven't predicted, only within 24h of kickoff.
 
 ## 6. Knockout bracket
 

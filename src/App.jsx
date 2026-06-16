@@ -1,10 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
 import {
   collection,
+  doc,
+  getDoc,
+  getDocs,
+  limit,
   onSnapshot,
   orderBy,
   query,
+  setDoc,
   where,
 } from "firebase/firestore";
 import { auth, db, googleProvider } from "./firebase.js";
@@ -37,6 +42,34 @@ export default function App() {
       setAuthReady(true);
     });
   }, []);
+
+  // First-ever sign-in: create the user's Firestore doc with sane defaults
+  // (auto-pick safety net ON) so brand-new players are covered immediately,
+  // even if they never open My Picks. Existing users are left untouched.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const ref = doc(db, "users", user.uid);
+        const snap = await getDoc(ref);
+        if (!cancelled && !snap.exists()) {
+          await setDoc(ref, {
+            displayName: user.displayName || "Anonymous",
+            photoURL: user.photoURL || "",
+            email: user.email || "",
+            remindersOn: false,
+            autoPickOn: true,
+          });
+        }
+      } catch (e) {
+        console.error("Could not initialize new user profile:", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   // Matches (live)
   useEffect(() => {
@@ -110,14 +143,7 @@ export default function App() {
               <span className="account-pts">
                 <b>{myPoints}</b> pts
               </span>
-              {user.photoURL && (
-                <img
-                  className="avatar"
-                  src={user.photoURL}
-                  alt=""
-                  referrerPolicy="no-referrer"
-                />
-              )}
+              <AccountMenu user={user} />
               <button className="btn ghost" onClick={() => signOut(auth)}>
                 Sign out
               </button>
@@ -230,5 +256,143 @@ function GoogleMark() {
       <path fill="#FBBC05" d="M5.5 14.14a6.9 6.9 0 0 1-.37-2.14c0-.74.13-1.46.35-2.14L1.82 7.02A11.2 11.2 0 0 0 .75 12c0 1.8.43 3.5 1.07 4.98l3.68-2.84z"/>
       <path fill="#34A853" d="M12 23.25c3.04 0 5.6-1 7.46-2.72l-3.57-2.77c-.95.66-2.23 1.13-3.89 1.13-3.06 0-5.64-2.06-6.5-4.75l-3.68 2.84C3.7 20.7 7.55 23.25 12 23.25z"/>
     </svg>
+  );
+}
+
+// Avatar button in the topbar that opens the profile/nickname dropdown.
+function AccountMenu({ user }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    function handleOutside(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, []);
+
+  return (
+    <div className="account-menu" ref={wrapRef}>
+      <button
+        className="avatar-btn"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="true"
+        aria-expanded={open}
+        aria-label="Open profile menu"
+      >
+        {user.photoURL ? (
+          <img className="avatar" src={user.photoURL} alt="" referrerPolicy="no-referrer" />
+        ) : (
+          <span className="avatar fallback" aria-hidden="true" />
+        )}
+      </button>
+      {open && <ProfileDropdown user={user} onClose={() => setOpen(false)} />}
+    </div>
+  );
+}
+
+// Nickname editor — moved here from My Picks so it lives at the top of the
+// page, next to Sign in / Sign out.
+function ProfileDropdown({ user, onClose }) {
+  const [saved, setSaved] = useState(undefined); // nickname currently in Firestore
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [flash, setFlash] = useState("");
+
+  useEffect(
+    () =>
+      onSnapshot(doc(db, "users", user.uid), (s) => {
+        const nick = s.exists() ? s.data().nickname || "" : "";
+        setSaved(nick);
+        setValue((v) => (v === "" || v === saved ? nick : v));
+      }),
+    [user.uid] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  if (saved === undefined) return null;
+
+  const trimmed = value.trim();
+  const valid = /^[A-Za-z0-9 _-]{3,20}$/.test(trimmed);
+  const dirty = trimmed !== saved;
+
+  async function save() {
+    if (!valid || !dirty) return;
+    setBusy(true);
+    try {
+      // Best-effort uniqueness check so two players don't share a name
+      const clash = await getDocs(
+        query(collection(db, "users"), where("nickname", "==", trimmed), limit(1))
+      );
+      if (!clash.empty && clash.docs[0].id !== user.uid) {
+        setFlash("taken");
+        setTimeout(() => setFlash(""), 2200);
+        return;
+      }
+      await setDoc(
+        doc(db, "users", user.uid),
+        {
+          displayName: user.displayName || "Anonymous",
+          photoURL: user.photoURL || "",
+          nickname: trimmed,
+        },
+        { merge: true }
+      );
+      setFlash("saved");
+      setTimeout(() => setFlash(""), 1600);
+    } catch (e) {
+      alert("Could not save nickname: " + e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="profile-dropdown" role="menu">
+      <button className="profile-close" onClick={onClose} aria-label="Close profile menu">
+        ×
+      </button>
+      <div className="profile-id">
+        {user.photoURL ? (
+          <img className="profile-avatar" src={user.photoURL} alt="" referrerPolicy="no-referrer" />
+        ) : (
+          <span className="profile-avatar fallback" aria-hidden="true" />
+        )}
+        <div>
+          <p className="panel-eyebrow">Profile</p>
+          <p className="profile-shown">{saved || user.displayName || "Anonymous"}</p>
+          <p className="panel-note">
+            {saved
+              ? "Your nickname is what everyone sees on leaderboards and leagues."
+              : "Set a nickname — it replaces your Google name on leaderboards and leagues."}
+          </p>
+        </div>
+      </div>
+      <div className="tb-input-row">
+        <input
+          className="tb-input wide"
+          value={value}
+          maxLength={20}
+          placeholder="e.g. xGoalMachine"
+          aria-label="Nickname"
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && save()}
+        />
+        <button className="btn solid" onClick={save} disabled={busy || !valid || !dirty}>
+          {busy
+            ? "Checking…"
+            : flash === "saved"
+            ? "Saved ✓"
+            : flash === "taken"
+            ? "Name taken"
+            : saved
+            ? "Update"
+            : "Save"}
+        </button>
+      </div>
+      {trimmed !== "" && !valid && (
+        <p className="profile-hint">3–20 characters: letters, numbers, spaces, - and _ only.</p>
+      )}
+    </div>
   );
 }
