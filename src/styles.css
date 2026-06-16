@@ -64,6 +64,10 @@ body {
 }
 
 .topbar, .hero, .tabs, main, .foot { position: relative; z-index: 1; }
+/* Topbar must paint above .hero — without this, the profile dropdown
+   (despite its own z-index) gets visually buried under the hero section,
+   since they'd otherwise tie on z-index and .hero comes later in markup. */
+.topbar { z-index: 40; }
 
 /* Top bar */
 .topbar {
@@ -108,7 +112,7 @@ body {
   transform: translateX(-50%);
 }
 
-.account { display: flex; align-items: center; gap: 12px; }
+.account { display: flex; align-items: center; gap: 12px; position: relative; }
 .account-pts {
   font-family: var(--numeral);
   font-variant-numeric: tabular-nums;
@@ -120,7 +124,7 @@ body {
 .avatar.fallback { background: var(--chalk-12); display: inline-block; }
 
 /* Avatar button + profile dropdown, top of page next to sign in/out */
-.account-menu { position: relative; display: flex; }
+.account-menu { display: flex; }
 .avatar-btn {
   background: none;
   border: none;
@@ -498,7 +502,7 @@ code {
   padding: 8px 12px;
   width: 110px;
 }
-.tb-input.wide { width: 100%; color: var(--chalk); font-family: var(--body); font-size: 15px; }
+.tb-input.wide { width: 100%; min-width: 0; color: var(--chalk); font-family: var(--body); font-size: 15px; }
 .tb-input.code { font-family: var(--numeral); letter-spacing: 0.3em; text-transform: uppercase; color: var(--volt); }
 .tb-input:focus-visible { outline: 2px solid var(--volt); outline-offset: 1px; }
 .tb-input::placeholder { color: var(--chalk-25); }
