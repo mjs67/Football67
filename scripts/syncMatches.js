@@ -12,6 +12,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import admin from "firebase-admin";
 import { recomputeLeaderboard } from "./recompute.js";
+import { generateRoast } from "../src/roastTemplates.js";
 
 if (existsSync("./serviceAccount.json")) {
   const sa = JSON.parse(readFileSync("./serviceAccount.json", "utf8"));
@@ -257,11 +258,123 @@ for (const m of data.matches) {
 }
 await batch.commit();
 console.log(`Upserted ${writes} matches (${settled} finished).`);
+
+// Generate roasts for all finished matches in this sync
+for (const m of data.matches) {
+  if (m.status !== "FINISHED") continue;
+  const matchId = `fd_${m.id}`;
+  const matchName = `${m.homeTeam.shortName || m.homeTeam.name} v ${m.awayTeam.shortName || m.awayTeam.name}`;
+  const finalScore = `${m.score.fullTime.home}-${m.score.fullTime.away}`;
+  await generateRoastsForLeagues(matchId, matchName, finalScore);
+}
 if (missingRatings.size > 0) {
   console.log(
     `No rating found for: ${[...missingRatings].join(", ")} — used default ${DEFAULT_RATING}. ` +
     "Add them to scripts/teamRatings.json (use these exact names)."
   );
+}
+
+// ── Roast generation — fires once per finished match, per league ──
+async function generateRoastsForLeagues(matchId, matchName, finalScore) {
+  try {
+    const leaguesSnap = await db.collection("leagues").get();
+    if (leaguesSnap.empty) return;
+
+    for (const leagueDoc of leaguesSnap.docs) {
+      const leagueId = leagueDoc.id;
+
+      // Skip if roast already exists for this match in this league
+      const existingRoast = await db
+        .collection("leagues").doc(leagueId)
+        .collection("matchRoasts").doc(matchId)
+        .get();
+      if (existingRoast.exists) continue;
+
+      const leagueData = leagueDoc.data();
+      const memberUids = leagueData.members || [];
+      if (memberUids.length === 0) continue;
+
+      // Get all predictions for this match
+      const predsSnap = await db
+        .collection("predictions")
+        .where("matchId", "==", matchId)
+        .get();
+      if (predsSnap.empty) continue;
+
+      // Filter to league members who scored points on this match
+      const [homeScore, awayScore] = finalScore.split("-").map(Number);
+      const scorers = [];
+      predsSnap.forEach(doc => {
+        const d = doc.data();
+        if (!memberUids.includes(d.uid)) return;
+        if (d.home == null) return; // no prediction made
+        let pts = 0;
+        if (d.home === homeScore && d.away === awayScore) {
+          pts = 5;
+        } else if (Math.sign(d.home - d.away) === Math.sign(homeScore - awayScore)) {
+          pts = 3;
+        }
+        if (pts > 0) {
+          scorers.push({ uid: d.uid, name: d.displayName || "Unknown", pts });
+        }
+      });
+      if (scorers.length === 0) continue;
+
+      // Get league standings (league members only, ordered by total points)
+      const allUsersSnap = await db.collection("users").orderBy("points", "desc").get();
+      const leagueStandings = allUsersSnap.docs
+        .filter(d => memberUids.includes(d.id))
+        .map((d, i) => ({ uid: d.id, rank: i + 1, totalPts: d.data().points || 0 }));
+
+      // Pick roast target: league leader if they scored, otherwise top match scorer
+      let target;
+      if (scorers.length === 1) {
+        target = scorers[0];
+      } else {
+        const leaderWhoScored = leagueStandings.find(s =>
+          scorers.some(sc => sc.uid === s.uid)
+        );
+        target = scorers.find(sc => sc.uid === leaderWhoScored?.uid)
+          ?? scorers.sort((a, b) => b.pts - a.pts)[0];
+      }
+
+      const targetStanding = leagueStandings.find(s => s.uid === target.uid);
+      const rank = targetStanding?.rank ?? 1;
+      const totalPts = targetStanding?.totalPts ?? 0;
+
+      const ordinal = n => {
+        const s = ["th", "st", "nd", "rd"];
+        const v = n % 100;
+        return n + (s[(v - 20) % 10] || s[v] || s[0]);
+      };
+
+      const roastText = generateRoast({
+        matchId,
+        name:      target.name,
+        pts:       target.pts,
+        match:     matchName,
+        score:     finalScore,
+        leaguePos: ordinal(rank),
+        totalPts,
+      });
+
+      await db
+        .collection("leagues").doc(leagueId)
+        .collection("matchRoasts").doc(matchId)
+        .set({
+          roastText,
+          targetName:  target.name,
+          targetUid:   target.uid,
+          matchName,
+          finalScore,
+          generatedAt: new Date().toISOString(),
+        });
+
+      console.log(`  🔥 Roast stored [${leagueId}] ${matchName} → ${target.name}`);
+    }
+  } catch (err) {
+    console.error("Roast generation skipped (non-fatal):", err.message);
+  }
 }
 
 // ── Auto-pick safety net ──

@@ -15,6 +15,7 @@ import {
   where,
 } from "firebase/firestore";
 import { db } from "../firebase.js";
+import MatchRoast from "./MatchRoast.jsx";
 
 const CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const makeCode = () =>
@@ -332,6 +333,13 @@ function RevealedPicks({ group, members, matches }) {
                 );
               })}
             </div>
+            {m.status === "finished" && (
+              <MatchRoast
+                leagueId={group.id}
+                matchId={m.id}
+                matchStatus={m.status}
+              />
+            )}
           </div>
         );
       })}
