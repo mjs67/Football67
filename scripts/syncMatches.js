@@ -12,7 +12,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import admin from "firebase-admin";
 import { recomputeLeaderboard } from "./recompute.js";
-import { generateRoast } from "./roastTemplates.js";
+import { generateRoast } from "../src/roastTemplates.js";
 
 if (existsSync("./serviceAccount.json")) {
   const sa = JSON.parse(readFileSync("./serviceAccount.json", "utf8"));
@@ -315,7 +315,11 @@ async function generateRoastsForLeagues(matchId, matchName, finalScore) {
           pts = 3;
         }
         if (pts > 0) {
-          scorers.push({ uid: d.uid, name: d.displayName || "Unknown", pts });
+          const userDoc = await db.collection("users").doc(d.uid).get();
+          const name = userDoc.exists
+            ? (userDoc.data().nickname || userDoc.data().displayName || d.displayName || "Unknown")
+            : (d.displayName || "Unknown");
+          scorers.push({ uid: d.uid, name, pts });
         }
       });
       if (scorers.length === 0) continue;
