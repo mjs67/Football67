@@ -7,10 +7,9 @@ export default function MatchRoast({ leagueId, matchId, matchStatus }) {
   const [roast, setRoast] = useState(null);
 
   useEffect(() => {
-    // Only load roast once the match is finished
     if (matchStatus !== "finished") return;
 
-    const ref = doc(db, "leagues", leagueId, "matchRoasts", matchId);
+    const ref = doc(db, "groups", leagueId, "matchRoasts", matchId);
     const unsub = onSnapshot(ref, snap => {
       if (snap.exists()) {
         setRoast(snap.data().roastText);

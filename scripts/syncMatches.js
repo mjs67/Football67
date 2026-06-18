@@ -12,7 +12,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import admin from "firebase-admin";
 import { recomputeLeaderboard } from "./recompute.js";
-import { generateRoast } from "./roastTemplates.js";
+import { generateRoast } from "../src/roastTemplates.js";
 
 if (existsSync("./serviceAccount.json")) {
   const sa = JSON.parse(readFileSync("./serviceAccount.json", "utf8"));
@@ -277,7 +277,7 @@ if (missingRatings.size > 0) {
 // ── Roast generation — fires once per finished match, per league ──
 async function generateRoastsForLeagues(matchId, matchName, finalScore) {
   try {
-    const leaguesSnap = await db.collection("leagues").get();
+    const leaguesSnap = await db.collection("groups").get();
     if (leaguesSnap.empty) return;
 
     for (const leagueDoc of leaguesSnap.docs) {
@@ -285,7 +285,7 @@ async function generateRoastsForLeagues(matchId, matchName, finalScore) {
 
       // Skip if roast already exists for this match in this league
       const existingRoast = await db
-        .collection("leagues").doc(leagueId)
+        .collection("groups").doc(leagueId)
         .collection("matchRoasts").doc(matchId)
         .get();
       if (existingRoast.exists) continue;
@@ -359,7 +359,7 @@ async function generateRoastsForLeagues(matchId, matchName, finalScore) {
       });
 
       await db
-        .collection("leagues").doc(leagueId)
+        .collection("groups").doc(leagueId)
         .collection("matchRoasts").doc(matchId)
         .set({
           roastText,
