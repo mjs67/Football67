@@ -12,7 +12,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import admin from "firebase-admin";
 import { recomputeLeaderboard } from "./recompute.js";
-import { generateRoast } from "../src/roastTemplates.js";
+import { generateRoast } from "./roastTemplates.js";
 
 if (existsSync("./serviceAccount.json")) {
   const sa = JSON.parse(readFileSync("./serviceAccount.json", "utf8"));
