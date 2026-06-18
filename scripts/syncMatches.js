@@ -304,10 +304,10 @@ async function generateRoastsForLeagues(matchId, matchName, finalScore) {
       // Filter to league members who scored points on this match
       const [homeScore, awayScore] = finalScore.split("-").map(Number);
       const scorers = [];
-      predsSnap.forEach(doc => {
-        const d = doc.data();
-        if (!memberUids.includes(d.uid)) return;
-        if (d.home == null) return; // no prediction made
+      for (const predDoc of predsSnap.docs) {
+        const d = predDoc.data();
+        if (!memberUids.includes(d.uid)) continue;
+        if (d.home == null) continue;
         let pts = 0;
         if (d.home === homeScore && d.away === awayScore) {
           pts = 5;
@@ -321,7 +321,7 @@ async function generateRoastsForLeagues(matchId, matchName, finalScore) {
             : (d.displayName || "Unknown");
           scorers.push({ uid: d.uid, name, pts });
         }
-      });
+      }
       if (scorers.length === 0) continue;
 
       // Get league standings (league members only, ordered by total points)
