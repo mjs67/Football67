@@ -1,6 +1,6 @@
 // src/components/MatchRoast.jsx
 import { useEffect, useState } from "react";
-import { doc, onSnapshot } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
 
 export default function MatchRoast({ leagueId, matchId, matchStatus }) {
@@ -9,14 +9,20 @@ export default function MatchRoast({ leagueId, matchId, matchStatus }) {
   useEffect(() => {
     if (matchStatus !== "finished") return;
 
-    const ref = doc(db, "groups", leagueId, "matchRoasts", matchId);
-    const unsub = onSnapshot(ref, snap => {
-      if (snap.exists()) {
-        setRoast(snap.data().roastText);
+    let cancelled = false;
+    async function load() {
+      try {
+        const ref = doc(db, "groups", leagueId, "matchRoasts", matchId);
+        const snap = await getDoc(ref);
+        if (!cancelled && snap.exists()) {
+          setRoast(snap.data().roastText);
+        }
+      } catch (e) {
+        // silently skip if permission denied or doc missing
       }
-    });
-
-    return () => unsub();
+    }
+    load();
+    return () => { cancelled = true; };
   }, [leagueId, matchId, matchStatus]);
 
   if (!roast) return null;
