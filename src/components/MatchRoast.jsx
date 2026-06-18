@@ -7,7 +7,7 @@ export default function MatchRoast({ leagueId, matchId, matchStatus }) {
   const [roast, setRoast] = useState(null);
 
   useEffect(() => {
-    if (matchStatus !== "finished") return;
+    if (matchStatus !== "finished" || !leagueId || !matchId) return;
 
     let cancelled = false;
     async function load() {
@@ -18,7 +18,7 @@ export default function MatchRoast({ leagueId, matchId, matchStatus }) {
           setRoast(snap.data().roastText);
         }
       } catch (e) {
-        // silently skip if permission denied or doc missing
+        console.error("MatchRoast error:", e.message);
       }
     }
     load();
