@@ -24,6 +24,7 @@ A FIFA-style match predictor: sign in with Google, lock in a scoreline for every
 - **Form graph & accuracy profile**: cumulative points sparkline (amber dots = exact scores) plus your hit-rate across all settled picks
 - **Auto-pick safety net**: ON by default for every new player (toggle stays in My Picks if someone wants to turn it off); if you forget a match, a default 1–1 is lodged for you just before kickoff (tagged "auto-pick" in your history)
 - **Tamper-proof leaderboard**: Firestore rules block clients from ever writing points
+- **Match roasts**: savage, brutal 2-sentence roasts targeting the top scorer from each finished match, generated automatically and displayed below locked-in picks in the Leagues section — with 50+ rotating templates so roasts never repeat, using player nicknames
 
 ## 1. Create the Firebase project (~5 min)
 
@@ -82,7 +83,22 @@ The "Email reminders" toggle has been removed from **My Picks** — there's no l
 - **Gmail**: host `smtp.gmail.com`, port `587`, user = your address, pass = an App Password (https://myaccount.google.com/apppasswords)
 - **Brevo / Resend / Mailgun** free tiers all provide SMTP credentials
 
-## 6. Knockout bracket
+## 6. Match roasts
+
+Roasts are generated automatically every time the sync job finishes — one roast per finished match, targeting the top scorer. No extra configuration needed; they appear in the Leagues section below locked-in picks once matches are finished.
+
+**To customize roasts**, edit the templates array in `scripts/roastTemplates.js`. Each template can use these variables: `{name}` (player nickname), `{pts}` (points earned), `{match}` (match name), `{score}` (final score), `{leaguePos}` (league position), `{totalPts}` (total league points). Add as many roasts as you like — they rotate by match ID so they never repeat:
+
+```js
+export const roastTemplates = [
+  // ... existing roasts ...
+  "New roast targeting {name} for {pts} points on {match}...",
+];
+```
+
+Then push to GitHub and re-run the workflow to regenerate roasts for old matches.
+
+## 7. Knockout bracket
 
 Create the bracket once the knockout teams are known (4, 8 or 16 teams, listed in bracket order — pair 1 plays 2, 3 plays 4, …):
 
@@ -141,8 +157,9 @@ predictions/{uid_matchId}  uid, matchId, home, away, displayName, photoURL
 users/{uid}             displayName, photoURL, email, remindersOn, autoPickOn,
                         points, exact, results, bracketPoints, tbDistance ← script-only
 brackets/{uid}          picks {matchId: team}   (locked at bracket deadline)
-settings/bracket        teams[], rounds, points[], deadline, results{}
 groups/{id}             name, code (6-char invite), ownerUid, members[]
+  matchRoasts/{matchId}   roastText, targetName, targetUid, matchName, finalScore ← script-only
+settings/bracket        teams[], rounds, points[], deadline, results{}
 settings/tiebreaker     question, answer
 tiebreakers/{uid}       uid, value
 reminders/{uid_matchId} sentAt          ← script-only dedupe ledger
