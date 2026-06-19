@@ -34,6 +34,7 @@ export default function App() {
   const [matches, setMatches] = useState([]);
   const [predictions, setPredictions] = useState({}); // matchId -> prediction
   const [loadingMatches, setLoadingMatches] = useState(true);
+  const [leaderTop, setLeaderTop] = useState(null); // { name, totalPts }
 
   // Auth state
   useEffect(() => {
@@ -70,6 +71,25 @@ export default function App() {
       cancelled = true;
     };
   }, [user]);
+
+  // Top leaderboard player for hero roast card (live)
+  useEffect(() => {
+    const q = query(collection(db, "users"));
+    return onSnapshot(q, (snap) => {
+      let top = null;
+      snap.docs.forEach((d) => {
+        const data = d.data();
+        const pts = data.totalPts || 0;
+        if (pts > 0 && (!top || pts > top.totalPts)) {
+          top = {
+            name: data.nickname || data.displayName || "Anonymous",
+            totalPts: pts,
+          };
+        }
+      });
+      setLeaderTop(top);
+    });
+  }, []);
 
   // Matches (live)
   useEffect(() => {
@@ -166,6 +186,23 @@ export default function App() {
           Lock in a scoreline for every fixture before kickoff. Exact score
           pays <b>5&nbsp;pts</b>, the right result pays <b>3&nbsp;pts</b>.
         </p>
+        {leaderTop && leaderTop.totalPts > 0 && (
+          <div className="hero-roast-card">
+            <div className="hero-roast-header">
+              <span className="hero-roast-flame">🔥</span>
+              <span className="hero-roast-label">This week's target</span>
+            </div>
+            <div className="hero-roast-body">
+              <div className="hero-roast-leader">
+                <span className="hero-roast-name">{leaderTop.name}</span>
+                <span className="hero-roast-pts">{leaderTop.totalPts} pts</span>
+              </div>
+              <p className="hero-roast-quote">
+                Riding a hot streak or just vibing? Either way, they're going down.
+              </p>
+            </div>
+          </div>
+        )}
         {!user && authReady && (
           <button className="btn solid lg" onClick={handleSignIn}>
             <GoogleMark /> Sign in to play

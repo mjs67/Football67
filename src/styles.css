@@ -229,6 +229,55 @@ body {
 }
 .hero-sub b { color: var(--volt); font-family: var(--numeral); }
 
+/* ── Hero roast card ───────────────────────────────────────── */
+.hero-roast-card {
+  margin: 20px auto 0;
+  max-width: 420px;
+  background: rgba(0,0,0,0.45);
+  border: 1px solid var(--volt);
+  border-radius: 8px;
+  padding: 14px 18px;
+  text-align: left;
+}
+.hero-roast-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.hero-roast-flame { font-size: 14px; }
+.hero-roast-label {
+  color: var(--volt);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.hero-roast-body { display: flex; flex-direction: column; gap: 6px; }
+.hero-roast-leader {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.hero-roast-name {
+  color: var(--chalk);
+  font-size: 20px;
+  font-weight: 900;
+  font-family: var(--head);
+}
+.hero-roast-pts {
+  color: var(--volt);
+  font-size: 14px;
+  font-weight: 700;
+  font-family: var(--numeral);
+}
+.hero-roast-quote {
+  color: #888;
+  font-size: 13px;
+  line-height: 1.4;
+  font-style: italic;
+}
+
 /* Tabs */
 .tabs {
   display: flex;
