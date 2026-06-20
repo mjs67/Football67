@@ -286,6 +286,7 @@ for (const m of data.matches) {
   const matchName = `${m.homeTeam.shortName || m.homeTeam.name} v ${m.awayTeam.shortName || m.awayTeam.name}`;
   const finalScore = `${m.score.fullTime.home}-${m.score.fullTime.away}`;
   await generateRoastsForLeagues(matchId, matchName, finalScore);
+  await generateGlobalRoast(matchId, matchName, finalScore);
 }
 if (missingRatings.size > 0) {
   console.log(
@@ -293,6 +294,28 @@ if (missingRatings.size > 0) {
     "Add them to scripts/teamRatings.json (use these exact names)."
   );
 }
+
+// Shared by both the per-league and the site-wide roast generators: picks
+// whoever performed BEST on this specific match (exact score beats
+// correct-result-only). Standing/rank only breaks ties between players who
+// scored the same points on this match — it never overrides who actually
+// called it right.
+function pickRoastTarget(scorers, standings) {
+  if (scorers.length === 1) return scorers[0];
+  const bestPts = Math.max(...scorers.map((sc) => sc.pts));
+  const topScorers = scorers.filter((sc) => sc.pts === bestPts);
+  if (topScorers.length === 1) return topScorers[0];
+  const highestRanked = standings.find((s) =>
+    topScorers.some((sc) => sc.uid === s.uid)
+  );
+  return topScorers.find((sc) => sc.uid === highestRanked?.uid) ?? topScorers[0];
+}
+
+const ordinal = (n) => {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+};
 
 // ── Roast generation — fires once per finished match, per league ──
 async function generateRoastsForLeagues(matchId, matchName, finalScore) {
@@ -354,33 +377,11 @@ async function generateRoastsForLeagues(matchId, matchName, finalScore) {
       // (exact score beats correct-result-only). League position only
       // breaks ties between players who scored the same points on this
       // match — it no longer overrides who actually called it right.
-      let target;
-      if (scorers.length === 1) {
-        target = scorers[0];
-      } else {
-        const bestPts = Math.max(...scorers.map((sc) => sc.pts));
-        const topScorers = scorers.filter((sc) => sc.pts === bestPts);
-        if (topScorers.length === 1) {
-          target = topScorers[0];
-        } else {
-          const highestRanked = leagueStandings.find((s) =>
-            topScorers.some((sc) => sc.uid === s.uid)
-          );
-          target =
-            topScorers.find((sc) => sc.uid === highestRanked?.uid) ??
-            topScorers[0];
-        }
-      }
+      const target = pickRoastTarget(scorers, leagueStandings);
 
       const targetStanding = leagueStandings.find(s => s.uid === target.uid);
       const rank = targetStanding?.rank ?? 1;
       const totalPts = targetStanding?.totalPts ?? 0;
-
-      const ordinal = n => {
-        const s = ["th", "st", "nd", "rd"];
-        const v = n % 100;
-        return n + (s[(v - 20) % 10] || s[v] || s[0]);
-      };
 
       const roastText = generateRoast({
         matchId,
@@ -408,6 +409,80 @@ async function generateRoastsForLeagues(matchId, matchName, finalScore) {
     }
   } catch (err) {
     console.error("Roast generation skipped (non-fatal):", err.message);
+  }
+}
+
+// ── Global roast — one site-wide roast per finished match, for the
+// homepage hero. Unlike the per-league roasts (private, auth-gated, scoped
+// to one group's members), this one is public and isn't tied to any league:
+// it looks at the GLOBAL leaderboard and ALL predictions for the match.
+// Reuses the same fixed targeting logic via pickRoastTarget().
+async function generateGlobalRoast(matchId, matchName, finalScore) {
+  try {
+    const existing = await db.collection("globalRoasts").doc(matchId).get();
+    if (existing.exists) return;
+
+    const predsSnap = await db
+      .collection("predictions")
+      .where("matchId", "==", matchId)
+      .get();
+    if (predsSnap.empty) return;
+
+    const [homeScore, awayScore] = finalScore.split("-").map(Number);
+    const scorers = [];
+    for (const predDoc of predsSnap.docs) {
+      const d = predDoc.data();
+      if (d.home == null) continue;
+      let pts = 0;
+      if (d.home === homeScore && d.away === awayScore) {
+        pts = 5;
+      } else if (Math.sign(d.home - d.away) === Math.sign(homeScore - awayScore)) {
+        pts = 3;
+      }
+      if (pts > 0) {
+        const userDoc = await db.collection("users").doc(d.uid).get();
+        const name = userDoc.exists
+          ? (userDoc.data().nickname || userDoc.data().displayName || d.displayName || "Unknown")
+          : (d.displayName || "Unknown");
+        scorers.push({ uid: d.uid, name, pts });
+      }
+    }
+    if (scorers.length === 0) return;
+
+    const allUsersSnap = await db.collection("users").orderBy("points", "desc").get();
+    const standings = allUsersSnap.docs.map((d, i) => ({
+      uid: d.id,
+      rank: i + 1,
+      totalPts: d.data().points || 0,
+    }));
+
+    const target = pickRoastTarget(scorers, standings);
+    const targetStanding = standings.find((s) => s.uid === target.uid);
+    const rank = targetStanding?.rank ?? 1;
+    const totalPts = targetStanding?.totalPts ?? 0;
+
+    const roastText = generateRoast({
+      matchId,
+      name:      target.name,
+      pts:       target.pts,
+      match:     matchName,
+      score:     finalScore,
+      leaguePos: ordinal(rank),
+      totalPts,
+    });
+
+    await db.collection("globalRoasts").doc(matchId).set({
+      roastText,
+      targetName:  target.name,
+      targetUid:   target.uid,
+      matchName,
+      finalScore,
+      generatedAt: new Date().toISOString(),
+    });
+
+    console.log(`  🔥 Global roast stored: ${matchName} → ${target.name}`);
+  } catch (err) {
+    console.error("Global roast generation skipped (non-fatal):", err.message);
   }
 }
 

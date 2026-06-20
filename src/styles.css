@@ -278,6 +278,20 @@ body {
   font-style: italic;
 }
 
+/* Live, match-specific roast (vs. the generic "this week's target" fallback) —
+   slightly hotter border + a one-line explainer for first-time visitors who
+   don't yet know what "getting roasted" means on this site. */
+.hero-roast-card--live {
+  border-color: #ff5a3c;
+  box-shadow: 0 0 0 1px rgba(255, 90, 60, 0.25);
+}
+.hero-roast-caption {
+  margin: 2px 0 0;
+  color: var(--chalk-60);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
 /* Tabs */
 .tabs {
   display: flex;

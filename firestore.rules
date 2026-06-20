@@ -98,6 +98,13 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Site-wide roast feed for the homepage hero — public read (no sign-in
+    // required, unlike the per-league roasts under /groups), script-only write
+    match /globalRoasts/{matchId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
     // Tiebreaker guesses: owner-only, locked once the answer is published
     match /tiebreakers/{uid} {
       allow read: if request.auth != null && request.auth.uid == uid;
@@ -128,3 +135,4 @@ service cloud.firestore {
     }
   }
 }
+
