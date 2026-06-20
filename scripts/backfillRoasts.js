@@ -52,24 +52,36 @@ console.log(`Found ${finishedSnap.size} finished matches in Firestore.`);
 // matters. Without it, this script alone can burn through Firestore's
 // free-tier daily quota (50K reads/day) on a single run across enough
 // matches and leagues.
-const roastCtx = await buildRoastContext(db);
-console.log(`Context: ${roastCtx.leagues.length} league(s), ${roastCtx.usersByPoints.length} user(s).`);
-
 let processed = 0;
-for (const matchDoc of finishedSnap.docs) {
-  const m = matchDoc.data();
-  if (m.homeScore == null || m.awayScore == null) {
-    console.log(`  ⚠ Skipping ${matchDoc.id} — marked finished but missing a score.`);
-    continue;
-  }
-  const matchName = `${m.home} v ${m.away}`;
-  const finalScore = `${m.homeScore}-${m.awayScore}`;
-  const predsSnap = await db.collection("predictions").where("matchId", "==", matchDoc.id).get();
-  const preds = predsSnap.docs.map((d) => d.data());
-  await generateRoastsForLeagues(db, roastCtx, matchDoc.id, matchName, finalScore, preds, { force: FORCE });
-  await generateGlobalRoast(db, roastCtx, matchDoc.id, matchName, finalScore, preds, { force: FORCE });
-  processed++;
-}
+try {
+  const roastCtx = await buildRoastContext(db);
+  console.log(`Context: ${roastCtx.leagues.length} league(s), ${roastCtx.usersByPoints.length} user(s).`);
 
-console.log(`Backfill complete — checked ${processed} finished matches.`);
-process.exit(0);
+  for (const matchDoc of finishedSnap.docs) {
+    const m = matchDoc.data();
+    if (m.homeScore == null || m.awayScore == null) {
+      console.log(`  ⚠ Skipping ${matchDoc.id} — marked finished but missing a score.`);
+      continue;
+    }
+    const matchName = `${m.home} v ${m.away}`;
+    const finalScore = `${m.homeScore}-${m.awayScore}`;
+    const predsSnap = await db.collection("predictions").where("matchId", "==", matchDoc.id).get();
+    const preds = predsSnap.docs.map((d) => d.data());
+    await generateRoastsForLeagues(db, roastCtx, matchDoc.id, matchName, finalScore, preds, { force: FORCE });
+    await generateGlobalRoast(db, roastCtx, matchDoc.id, matchName, finalScore, preds, { force: FORCE });
+    processed++;
+  }
+
+  console.log(`Backfill complete — checked ${processed} finished matches.`);
+  process.exit(0);
+} catch (err) {
+  // Most likely cause: Firestore's daily free-tier quota ran out mid-run.
+  // Whatever was already written before this point is still in Firestore —
+  // nothing rolls back — but the run is genuinely incomplete, so this exits
+  // non-zero (unlike syncMatches.js, there's no recomputeLeaderboard() or
+  // other critical step after this to protect; an incomplete backfill
+  // should be visibly incomplete).
+  console.error(`\n⚠ Backfill stopped after ${processed} match(es) — ${err.message}`);
+  console.error("Already-processed matches above are saved. Re-run this script later (it's idempotent) to pick up where it left off.");
+  process.exit(1);
+}

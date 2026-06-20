@@ -317,17 +317,35 @@ if (venueUnmatched.size > 0) {
 // each match's predictions are fetched once and shared between the
 // per-league and global generators — see roastGeneration.js for why this
 // matters (it's the difference between ~10 reads and ~1000+ reads here).
+//
+// Wrapped in its own try/catch: roast generation is a nice-to-have, not
+// core functionality, and must never be able to take the rest of the sync
+// down with it. Without this, a transient Firestore failure here (quota
+// exhaustion, a network blip, anything) throws uncaught and the process
+// exits before ever reaching recomputeLeaderboard() below — meaning the
+// leaderboard silently stops updating even though match/venue sync earlier
+// in this run already succeeded and committed. The individual generator
+// functions in roastGeneration.js already catch their own errors; this
+// closes the gap around buildRoastContext() and the predictions fetch,
+// which sit outside those.
 const finishedThisRun = data.matches.filter((m) => m.status === "FINISHED");
 if (finishedThisRun.length > 0) {
-  const roastCtx = await buildRoastContext(db);
-  for (const m of finishedThisRun) {
-    const matchId = `fd_${m.id}`;
-    const matchName = `${m.homeTeam.shortName || m.homeTeam.name} v ${m.awayTeam.shortName || m.awayTeam.name}`;
-    const finalScore = `${m.score.fullTime.home}-${m.score.fullTime.away}`;
-    const predsSnap = await db.collection("predictions").where("matchId", "==", matchId).get();
-    const preds = predsSnap.docs.map((d) => d.data());
-    await generateRoastsForLeagues(db, roastCtx, matchId, matchName, finalScore, preds);
-    await generateGlobalRoast(db, roastCtx, matchId, matchName, finalScore, preds);
+  try {
+    const roastCtx = await buildRoastContext(db);
+    for (const m of finishedThisRun) {
+      const matchId = `fd_${m.id}`;
+      const matchName = `${m.homeTeam.shortName || m.homeTeam.name} v ${m.awayTeam.shortName || m.awayTeam.name}`;
+      const finalScore = `${m.score.fullTime.home}-${m.score.fullTime.away}`;
+      const predsSnap = await db.collection("predictions").where("matchId", "==", matchId).get();
+      const preds = predsSnap.docs.map((d) => d.data());
+      await generateRoastsForLeagues(db, roastCtx, matchId, matchName, finalScore, preds);
+      await generateGlobalRoast(db, roastCtx, matchId, matchName, finalScore, preds);
+    }
+  } catch (err) {
+    console.error(
+      "⚠ Roast generation skipped for this entire sync (non-fatal — leaderboard recompute still runs below):",
+      err.message
+    );
   }
 }
 if (missingRatings.size > 0) {
