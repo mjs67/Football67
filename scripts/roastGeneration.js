@@ -141,12 +141,26 @@ export async function generateGlobalRoast(db, matchId, matchName, finalScore, { 
     const existing = await roastRef.get();
     if (existing.exists && !force) return;
 
+    // On a forced regenerate, a match that USED to qualify (under whatever
+    // logic generated the existing doc) might not qualify any more under
+    // the current rule — e.g. the targeting rule changed, or the overall
+    // leader changed and the new leader didn't score on this match. Don't
+    // just skip it and leave the stale doc sitting there: remove it, so
+    // the homepage's "most recent roast" query doesn't keep surfacing
+    // content that no longer reflects how targeting actually works.
+    const disqualify = async (reason) => {
+      if (existing.exists && force) {
+        await roastRef.delete();
+        console.log(`  🗑 Global roast removed [${reason}]: ${matchName}`);
+      }
+    };
+
     // Same tiebreak chain as Leaderboard.jsx (points → tbDistance → exact →
     // name) so "the overall leader" here can never disagree with who's
     // actually shown as #1 on the leaderboard. limit(10) is a generous
     // buffer — only matters if several players are tied at the very top.
     const topSnap = await db.collection("users").orderBy("points", "desc").limit(10).get();
-    if (topSnap.empty) return;
+    if (topSnap.empty) return disqualify("no users");
     const candidates = topSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
     candidates.sort(
       (a, b) =>
@@ -160,9 +174,9 @@ export async function generateGlobalRoast(db, matchId, matchName, finalScore, { 
     // Predictions are stored with doc id "<uid>_<matchId>" — direct lookup,
     // no need to scan every prediction for this match.
     const predDoc = await db.doc(`predictions/${leader.id}_${matchId}`).get();
-    if (!predDoc.exists) return;
+    if (!predDoc.exists) return disqualify("leader didn't predict this match");
     const d = predDoc.data();
-    if (d.home == null) return;
+    if (d.home == null) return disqualify("leader's prediction incomplete");
 
     const [homeScore, awayScore] = finalScore.split("-").map(Number);
     let pts = 0;
@@ -171,7 +185,7 @@ export async function generateGlobalRoast(db, matchId, matchName, finalScore, { 
     } else if (Math.sign(d.home - d.away) === Math.sign(homeScore - awayScore)) {
       pts = 3;
     }
-    if (pts === 0) return; // leader didn't score on this one — keep the roast text honest
+    if (pts === 0) return disqualify("leader scored 0 on this match"); // keep the roast text honest
 
     const name = nameOf(leader);
     const totalPts = leader.points || 0;
