@@ -4,28 +4,51 @@ import { db } from "../firebase.js";
 
 const nameOf = (r) => r.nickname || r.displayName || "Anonymous";
 
+// Maps each scope to the field names that back it. "overall" is the
+// existing all-time table (unchanged); "group" and "knockout" read the
+// buckets recompute.js writes alongside it — same user doc, different
+// fields, so nobody's all-time standing is ever touched by these views.
+const SCOPES = {
+  overall: {
+    label: "Overall",
+    points: "points", exact: "exact", results: "results", predictionsCount: "predictionsCount",
+  },
+  group: {
+    label: "Group Stage",
+    points: "groupPoints", exact: "groupExact", results: "groupResults", predictionsCount: "groupPredictionsCount",
+  },
+  knockout: {
+    label: "Knockout",
+    points: "knockoutPoints", exact: "knockoutExact", results: "knockoutResults", predictionsCount: "knockoutPredictionsCount",
+  },
+};
+
 export default function Leaderboard({ me }) {
+  const [scope, setScope] = useState("overall");
   const [rows, setRows] = useState(null);
 
   useEffect(() => {
+    setRows(null); // show the loading state while switching scopes
+    const f = SCOPES[scope];
     const q = query(
       collection(db, "users"),
-      orderBy("points", "desc"),
+      orderBy(f.points, "desc"),
       limit(100)
     );
     return onSnapshot(
       q,
       (snap) => {
         const r = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        // Ties broken by: tiebreaker distance (closest guess) → exact scores →
-        // alphanumeric on name. The last step is what was missing — without it,
-        // players tied on every stat fell back to Firestore's arbitrary
-        // document order instead of a stable, predictable order.
+        // Ties broken by: tiebreaker distance (closest guess) → exact scores
+        // for the active scope → alphanumeric on name. The alphanumeric
+        // step is what was missing originally — without it, players tied on
+        // every stat fell back to Firestore's arbitrary document order
+        // instead of a stable, predictable one.
         r.sort(
           (a, b) =>
-            (b.points ?? 0) - (a.points ?? 0) ||
+            (b[f.points] ?? 0) - (a[f.points] ?? 0) ||
             (a.tbDistance ?? Infinity) - (b.tbDistance ?? Infinity) ||
-            (b.exact ?? 0) - (a.exact ?? 0) ||
+            (b[f.exact] ?? 0) - (a[f.exact] ?? 0) ||
             nameOf(a).localeCompare(nameOf(b), undefined, {
               numeric: true,
               sensitivity: "base",
@@ -35,42 +58,67 @@ export default function Leaderboard({ me }) {
       },
       () => setRows([])
     );
-  }, []);
+  }, [scope]);
 
-  if (rows === null) return <p className="empty">Loading table…</p>;
-  if (rows.length === 0)
-    return (
-      <p className="empty">
-        Nobody on the table yet. Points appear automatically once matches
-        finish and the sync job runs.
-      </p>
-    );
+  const f = SCOPES[scope];
 
   return (
-    <ol className="ladder">
-      <li className="ladder-head" aria-hidden="true">
-        <span className="pos">#</span>
-        <span className="who">Player</span>
-        <span className="stat">Exact</span>
-        <span className="stat">Results</span>
-        <span className="pts">Pts</span>
-      </li>
-      {rows.map((r, i) => (
-        <li key={r.id} className={"ladder-row" + (me && r.id === me.uid ? " me" : "")}>
-          <span className="pos">{i + 1}</span>
-          <span className="who">
-            {r.photoURL ? (
-              <img src={r.photoURL} alt="" referrerPolicy="no-referrer" />
-            ) : (
-              <span className="who-fallback" aria-hidden="true" />
-            )}
-            {nameOf(r)}
-          </span>
-          <span className="stat">{r.exact ?? 0}</span>
-          <span className="stat">{r.results ?? 0}</span>
-          <span className="pts">{r.points ?? 0}</span>
-        </li>
-      ))}
-    </ol>
+    <>
+      <div className="scope-switch" role="tablist" aria-label="Leaderboard scope">
+        {Object.entries(SCOPES).map(([key, s]) => (
+          <button
+            key={key}
+            role="tab"
+            aria-selected={scope === key}
+            className={scope === key ? "scope-pill active" : "scope-pill"}
+            onClick={() => setScope(key)}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
+
+      {rows === null ? (
+        <p className="empty">Loading table…</p>
+      ) : rows.length === 0 ? (
+        <p className="empty">
+          {scope === "overall"
+            ? "Nobody on the table yet. Points appear automatically once matches finish and the sync job runs."
+            : `No ${f.label.toLowerCase()} points yet — check back once those fixtures kick off.`}
+        </p>
+      ) : (
+        <ol className="ladder">
+          <li className="ladder-head" aria-hidden="true">
+            <span className="pos">#</span>
+            <span className="who">Player</span>
+            <span className="stat">Exact</span>
+            <span className="stat">Results</span>
+            <span className="stat rate">Pts/Pred</span>
+            <span className="pts">Pts</span>
+          </li>
+          {rows.map((r, i) => {
+            const count = r[f.predictionsCount] ?? 0;
+            const rate = count > 0 ? (r[f.points] ?? 0) / count : null;
+            return (
+              <li key={r.id} className={"ladder-row" + (me && r.id === me.uid ? " me" : "")}>
+                <span className="pos">{i + 1}</span>
+                <span className="who">
+                  {r.photoURL ? (
+                    <img src={r.photoURL} alt="" referrerPolicy="no-referrer" />
+                  ) : (
+                    <span className="who-fallback" aria-hidden="true" />
+                  )}
+                  {nameOf(r)}
+                </span>
+                <span className="stat">{r[f.exact] ?? 0}</span>
+                <span className="stat">{r[f.results] ?? 0}</span>
+                <span className="stat rate">{rate === null ? "—" : rate.toFixed(1)}</span>
+                <span className="pts">{r[f.points] ?? 0}</span>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </>
   );
 }

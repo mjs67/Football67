@@ -268,6 +268,11 @@ for (const m of data.matches) {
       homeFlag: m.homeTeam.crest || "⚽",
       awayFlag: m.awayTeam.crest || "⚽",
       competition: stageLabel(m) ? `${compName} · ${stageLabel(m)}` : compName,
+      // Stage Tables: group vs knockout, for a leaderboard that resets at
+      // the natural tournament checkpoint instead of only ever accumulating.
+      // m.group is set for group-stage matches and null once the knockout
+      // bracket starts — the API already tells us this, no extra lookup.
+      phase: m.group ? "group" : "knockout",
       venue: venueLabel(m),
       kickoff: admin.firestore.Timestamp.fromDate(new Date(m.utcDate)),
       status: finished ? "finished" : "upcoming",

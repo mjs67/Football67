@@ -439,11 +439,40 @@ body {
 .verdict.v5 { color: var(--volt); font-weight: 600; }
 .verdict.v3 { color: var(--chalk); }
 
+/* Leaderboard scope switch (Overall / Group Stage / Knockout) — a
+   secondary, pill-style control distinct from the primary .tabs nav above,
+   reusing the same volt/volt-ink pattern as .btn.solid for the active state. */
+.scope-switch {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.scope-pill {
+  background: var(--pitch);
+  border: 1px solid var(--chalk-12);
+  color: var(--chalk-60);
+  font-family: var(--display);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 12px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.scope-pill:focus-visible { outline: 2px solid var(--volt); outline-offset: 2px; }
+.scope-pill.active {
+  background: var(--volt);
+  border-color: var(--volt);
+  color: var(--volt-ink);
+}
+
 /* Leaderboard */
 .ladder { list-style: none; margin: 0; padding: 0; }
 .ladder-head, .ladder-row {
   display: grid;
-  grid-template-columns: 36px 1fr 56px 56px 56px;
+  grid-template-columns: 36px 1fr 56px 56px 64px 56px;
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
@@ -502,6 +531,7 @@ code {
   .flag { font-size: 28px; }
   .digit { font-size: 32px; }
   .ladder-head, .ladder-row { grid-template-columns: 28px 1fr 44px 44px 44px; padding: 9px 10px; }
+  .stat.rate { display: none; }
   .account-pts { display: none; }
 }
 
