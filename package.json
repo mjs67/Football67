@@ -10,6 +10,7 @@
     "seed": "node scripts/seedMatches.js",
     "settle": "node scripts/settleMatches.js",
     "sync": "node scripts/syncMatches.js",
+    "backfillRoasts": "node scripts/backfillRoasts.js",
     "remind": "node scripts/sendReminders.js",
     "tiebreaker": "node scripts/tiebreaker.js",
     "bracket": "node scripts/bracket.js"
