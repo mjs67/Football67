@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { collection, limit, onSnapshot, orderBy, query } from "firebase/firestore";
 import { db } from "../firebase.js";
 
+const nameOf = (r) => r.nickname || r.displayName || "Anonymous";
+
 export default function Leaderboard({ me }) {
   const [rows, setRows] = useState(null);
 
@@ -15,12 +17,19 @@ export default function Leaderboard({ me }) {
       q,
       (snap) => {
         const r = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        // Ties broken by tiebreaker distance (closest guess), then exact scores
+        // Ties broken by: tiebreaker distance (closest guess) → exact scores →
+        // alphanumeric on name. The last step is what was missing — without it,
+        // players tied on every stat fell back to Firestore's arbitrary
+        // document order instead of a stable, predictable order.
         r.sort(
           (a, b) =>
             (b.points ?? 0) - (a.points ?? 0) ||
             (a.tbDistance ?? Infinity) - (b.tbDistance ?? Infinity) ||
-            (b.exact ?? 0) - (a.exact ?? 0)
+            (b.exact ?? 0) - (a.exact ?? 0) ||
+            nameOf(a).localeCompare(nameOf(b), undefined, {
+              numeric: true,
+              sensitivity: "base",
+            })
         );
         setRows(r);
       },
@@ -55,7 +64,7 @@ export default function Leaderboard({ me }) {
             ) : (
               <span className="who-fallback" aria-hidden="true" />
             )}
-            {r.nickname || r.displayName || "Anonymous"}
+            {nameOf(r)}
           </span>
           <span className="stat">{r.exact ?? 0}</span>
           <span className="stat">{r.results ?? 0}</span>

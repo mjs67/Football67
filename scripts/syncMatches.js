@@ -204,13 +204,19 @@ try {
 } catch {
   /* optional file */
 }
+let venueMissingFromApi = 0; // API gave us no venue string at all for this match
+let venueUnmatched = new Set(); // API gave a venue string, but it's not in venues.json
 function venueLabel(m) {
-  if (!m.venue) return null;
+  if (!m.venue) {
+    venueMissingFromApi++;
+    return null;
+  }
   const lower = m.venue.toLowerCase();
   for (const [keyword, place] of Object.entries(venuePlaces)) {
     if (keyword.startsWith("_")) continue;
     if (lower.includes(keyword)) return `${m.venue} · ${place}`;
   }
+  venueUnmatched.add(m.venue);
   return m.venue;
 }
 const compName = (data.competition?.name || COMP).replace(/^FIFA /, "");
@@ -258,6 +264,20 @@ for (const m of data.matches) {
 }
 await batch.commit();
 console.log(`Upserted ${writes} matches (${settled} finished).`);
+if (venueMissingFromApi > 0) {
+  console.log(
+    `⚠ ${venueMissingFromApi}/${data.matches.length} matches had no "venue" field from football-data.org — ` +
+    `this is the football-data.org account/endpoint, not venues.json (it never even ran the lookup). ` +
+    "Check your account tier or whether this competition publishes venue data on the list endpoint."
+  );
+}
+if (venueUnmatched.size > 0) {
+  console.log(
+    `⚠ venue string(s) from the API didn't match any keyword in scripts/venues.json: ` +
+    [...venueUnmatched].map((v) => `"${v}"`).join(", ") +
+    ". Add a keyword entry for these so they resolve to a city/country label."
+  );
+}
 
 // Generate roasts for all finished matches in this sync
 for (const m of data.matches) {
@@ -330,16 +350,26 @@ async function generateRoastsForLeagues(matchId, matchName, finalScore) {
         .filter(d => memberUids.includes(d.id))
         .map((d, i) => ({ uid: d.id, rank: i + 1, totalPts: d.data().points || 0 }));
 
-      // Pick roast target: league leader if they scored, otherwise top match scorer
+      // Pick roast target: whoever performed BEST on this specific match
+      // (exact score beats correct-result-only). League position only
+      // breaks ties between players who scored the same points on this
+      // match — it no longer overrides who actually called it right.
       let target;
       if (scorers.length === 1) {
         target = scorers[0];
       } else {
-        const leaderWhoScored = leagueStandings.find(s =>
-          scorers.some(sc => sc.uid === s.uid)
-        );
-        target = scorers.find(sc => sc.uid === leaderWhoScored?.uid)
-          ?? scorers.sort((a, b) => b.pts - a.pts)[0];
+        const bestPts = Math.max(...scorers.map((sc) => sc.pts));
+        const topScorers = scorers.filter((sc) => sc.pts === bestPts);
+        if (topScorers.length === 1) {
+          target = topScorers[0];
+        } else {
+          const highestRanked = leagueStandings.find((s) =>
+            topScorers.some((sc) => sc.uid === s.uid)
+          );
+          target =
+            topScorers.find((sc) => sc.uid === highestRanked?.uid) ??
+            topScorers[0];
+        }
       }
 
       const targetStanding = leagueStandings.find(s => s.uid === target.uid);

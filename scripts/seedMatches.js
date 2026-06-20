@@ -14,12 +14,12 @@ const db = admin.firestore();
 const hours = (n) => new Date(Date.now() + n * 3600 * 1000);
 
 const fixtures = [
-  { home: "Brazil", away: "Germany", homeFlag: "🇧🇷", awayFlag: "🇩🇪", competition: "World Cup · Group A", kickoff: hours(26) },
-  { home: "Argentina", away: "France", homeFlag: "🇦🇷", awayFlag: "🇫🇷", competition: "World Cup · Group B", kickoff: hours(30) },
-  { home: "Spain", away: "England", homeFlag: "🇪🇸", awayFlag: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", competition: "World Cup · Group C", kickoff: hours(50) },
-  { home: "USA", away: "Mexico", homeFlag: "🇺🇸", awayFlag: "🇲🇽", competition: "World Cup · Group D", kickoff: hours(54) },
-  { home: "Japan", away: "Morocco", homeFlag: "🇯🇵", awayFlag: "🇲🇦", competition: "World Cup · Group E", kickoff: hours(74) },
-  { home: "Portugal", away: "Netherlands", homeFlag: "🇵🇹", awayFlag: "🇳🇱", competition: "World Cup · Group F", kickoff: hours(78) },
+  { home: "Brazil", away: "Germany", homeFlag: "🇧🇷", awayFlag: "🇩🇪", competition: "World Cup · Group A", venue: "Estadio Azteca · Mexico City, Mexico", kickoff: hours(26) },
+  { home: "Argentina", away: "France", homeFlag: "🇦🇷", awayFlag: "🇫🇷", competition: "World Cup · Group B", venue: "MetLife Stadium · New York / New Jersey, USA", kickoff: hours(30) },
+  { home: "Spain", away: "England", homeFlag: "🇪🇸", awayFlag: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", competition: "World Cup · Group C", venue: "SoFi Stadium · Los Angeles, USA", kickoff: hours(50) },
+  { home: "USA", away: "Mexico", homeFlag: "🇺🇸", awayFlag: "🇲🇽", competition: "World Cup · Group D", venue: "AT&T Stadium · Arlington (Dallas), USA", kickoff: hours(54) },
+  { home: "Japan", away: "Morocco", homeFlag: "🇯🇵", awayFlag: "🇲🇦", competition: "World Cup · Group E", venue: "Lumen Field · Seattle, USA", kickoff: hours(74) },
+  { home: "Portugal", away: "Netherlands", homeFlag: "🇵🇹", awayFlag: "🇳🇱", competition: "World Cup · Group F", venue: "BMO Field · Toronto, Canada", kickoff: hours(78) },
 ];
 
 const batch = db.batch();
