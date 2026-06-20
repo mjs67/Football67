@@ -12,7 +12,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import admin from "firebase-admin";
 import { recomputeLeaderboard } from "./recompute.js";
-import { generateRoastsForLeagues, generateGlobalRoast } from "./roastGeneration.js";
+import { generateRoastsForLeagues, generateGlobalRoast, buildRoastContext } from "./roastGeneration.js";
 import { venueFromSchedule } from "./wc2026Venues.js";
 
 if (existsSync("./serviceAccount.json")) {
@@ -312,14 +312,23 @@ if (venueUnmatched.size > 0) {
   );
 }
 
-// Generate roasts for all finished matches in this sync
-for (const m of data.matches) {
-  if (m.status !== "FINISHED") continue;
-  const matchId = `fd_${m.id}`;
-  const matchName = `${m.homeTeam.shortName || m.homeTeam.name} v ${m.awayTeam.shortName || m.awayTeam.name}`;
-  const finalScore = `${m.score.fullTime.home}-${m.score.fullTime.away}`;
-  await generateRoastsForLeagues(db, matchId, matchName, finalScore);
-  await generateGlobalRoast(db, matchId, matchName, finalScore);
+// Generate roasts for all finished matches in this sync.
+// Context (leagues + full users list) is built ONCE for the whole run, and
+// each match's predictions are fetched once and shared between the
+// per-league and global generators — see roastGeneration.js for why this
+// matters (it's the difference between ~10 reads and ~1000+ reads here).
+const finishedThisRun = data.matches.filter((m) => m.status === "FINISHED");
+if (finishedThisRun.length > 0) {
+  const roastCtx = await buildRoastContext(db);
+  for (const m of finishedThisRun) {
+    const matchId = `fd_${m.id}`;
+    const matchName = `${m.homeTeam.shortName || m.homeTeam.name} v ${m.awayTeam.shortName || m.awayTeam.name}`;
+    const finalScore = `${m.score.fullTime.home}-${m.score.fullTime.away}`;
+    const predsSnap = await db.collection("predictions").where("matchId", "==", matchId).get();
+    const preds = predsSnap.docs.map((d) => d.data());
+    await generateRoastsForLeagues(db, roastCtx, matchId, matchName, finalScore, preds);
+    await generateGlobalRoast(db, roastCtx, matchId, matchName, finalScore, preds);
+  }
 }
 if (missingRatings.size > 0) {
   console.log(

@@ -28,7 +28,7 @@
 //   node scripts/backfillRoasts.js --force    (regenerate everything)
 import { readFileSync, existsSync } from "node:fs";
 import admin from "firebase-admin";
-import { generateRoastsForLeagues, generateGlobalRoast } from "./roastGeneration.js";
+import { generateRoastsForLeagues, generateGlobalRoast, buildRoastContext } from "./roastGeneration.js";
 
 if (existsSync("./serviceAccount.json")) {
   const sa = JSON.parse(readFileSync("./serviceAccount.json", "utf8"));
@@ -48,6 +48,13 @@ console.log(
 const finishedSnap = await db.collection("matches").where("status", "==", "finished").get();
 console.log(`Found ${finishedSnap.size} finished matches in Firestore.`);
 
+// Built once for the whole run — see roastGeneration.js for why this
+// matters. Without it, this script alone can burn through Firestore's
+// free-tier daily quota (50K reads/day) on a single run across enough
+// matches and leagues.
+const roastCtx = await buildRoastContext(db);
+console.log(`Context: ${roastCtx.leagues.length} league(s), ${roastCtx.usersByPoints.length} user(s).`);
+
 let processed = 0;
 for (const matchDoc of finishedSnap.docs) {
   const m = matchDoc.data();
@@ -57,8 +64,10 @@ for (const matchDoc of finishedSnap.docs) {
   }
   const matchName = `${m.home} v ${m.away}`;
   const finalScore = `${m.homeScore}-${m.awayScore}`;
-  await generateRoastsForLeagues(db, matchDoc.id, matchName, finalScore, { force: FORCE });
-  await generateGlobalRoast(db, matchDoc.id, matchName, finalScore, { force: FORCE });
+  const predsSnap = await db.collection("predictions").where("matchId", "==", matchDoc.id).get();
+  const preds = predsSnap.docs.map((d) => d.data());
+  await generateRoastsForLeagues(db, roastCtx, matchDoc.id, matchName, finalScore, preds, { force: FORCE });
+  await generateGlobalRoast(db, roastCtx, matchDoc.id, matchName, finalScore, preds, { force: FORCE });
   processed++;
 }
 

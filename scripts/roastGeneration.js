@@ -3,7 +3,35 @@
 // scripts/backfillRoasts.js (one-off, runs against every finished match in
 // Firestore regardless of how old it is). Keeping this in one place means
 // the two can never drift out of sync on targeting logic.
+//
+// Read efficiency: buildRoastContext() fetches the leagues list and the
+// full users collection ONCE per script run, not once per match. The
+// caller also fetches each match's predictions once and passes them to
+// both generators, instead of each generator querying independently. For
+// a 43-match backfill across 3 leagues, this took the read count from
+// several thousand (mostly a full users-collection scan repeated for every
+// match×league pair) down to roughly a hundred — the difference between
+// burning through Firestore's free-tier daily quota and not.
 import { generateRoast } from "./roastTemplates.js";
+
+const nameOf = (r) => r.nickname || r.displayName || "Unknown";
+
+// Call once per script run (sync or backfill), before looping over matches.
+export async function buildRoastContext(db) {
+  const [leaguesSnap, usersSnap] = await Promise.all([
+    db.collection("groups").get(),
+    db.collection("users").orderBy("points", "desc").get(),
+  ]);
+  const leagues = leaguesSnap.docs.map((d) => ({
+    id: d.id,
+    members: d.data().members || [],
+  }));
+  // Sorted by points only (Firestore's native order) — this is exactly the
+  // ordering the league-standings logic always used, preserved as-is.
+  const usersByPoints = usersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const usersById = new Map(usersByPoints.map((u) => [u.id, u]));
+  return { leagues, usersByPoints, usersById };
+}
 
 // Picks whoever performed BEST on this specific match (exact score beats
 // correct-result-only). Standing/rank only breaks ties between players who
@@ -26,17 +54,26 @@ export const ordinal = (n) => {
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 };
 
+function scorePrediction(d, homeScore, awayScore) {
+  if (d.home == null) return 0;
+  if (d.home === homeScore && d.away === awayScore) return 5;
+  if (Math.sign(d.home - d.away) === Math.sign(homeScore - awayScore)) return 3;
+  return 0;
+}
+
 // ── Per-league roast — fires once per finished match, per league ──
-export async function generateRoastsForLeagues(db, matchId, matchName, finalScore, { force = false } = {}) {
+// `preds` is the already-fetched array of prediction data for this match
+// (from `db.collection("predictions").where("matchId","==",matchId).get()`,
+// docs mapped to `.data()`), fetched once by the caller and shared with
+// generateGlobalRoast — not re-queried here.
+export async function generateRoastsForLeagues(db, ctx, matchId, matchName, finalScore, preds, { force = false } = {}) {
   try {
-    const leaguesSnap = await db.collection("groups").get();
-    if (leaguesSnap.empty) return;
+    if (ctx.leagues.length === 0 || preds.length === 0) return;
+    const [homeScore, awayScore] = finalScore.split("-").map(Number);
 
-    for (const leagueDoc of leaguesSnap.docs) {
-      const leagueId = leagueDoc.id;
-
+    for (const league of ctx.leagues) {
       const roastRef = db
-        .collection("groups").doc(leagueId)
+        .collection("groups").doc(league.id)
         .collection("matchRoasts").doc(matchId);
       const existingRoast = await roastRef.get();
       // Normally: skip if already generated. With force=true (used by the
@@ -45,49 +82,31 @@ export async function generateRoastsForLeagues(db, matchId, matchName, finalScor
       // buggy version of the targeting logic.
       if (existingRoast.exists && !force) continue;
 
-      const leagueData = leagueDoc.data();
-      const memberUids = leagueData.members || [];
+      const memberUids = league.members;
       if (memberUids.length === 0) continue;
 
-      // Get all predictions for this match
-      const predsSnap = await db
-        .collection("predictions")
-        .where("matchId", "==", matchId)
-        .get();
-      if (predsSnap.empty) continue;
-
       // Filter to league members who scored points on this match
-      const [homeScore, awayScore] = finalScore.split("-").map(Number);
       const scorers = [];
-      for (const predDoc of predsSnap.docs) {
-        const d = predDoc.data();
+      for (const d of preds) {
         if (!memberUids.includes(d.uid)) continue;
-        if (d.home == null) continue;
-        let pts = 0;
-        if (d.home === homeScore && d.away === awayScore) {
-          pts = 5;
-        } else if (Math.sign(d.home - d.away) === Math.sign(homeScore - awayScore)) {
-          pts = 3;
-        }
+        const pts = scorePrediction(d, homeScore, awayScore);
         if (pts > 0) {
-          const userDoc = await db.collection("users").doc(d.uid).get();
-          const name = userDoc.exists
-            ? (userDoc.data().nickname || userDoc.data().displayName || d.displayName || "Unknown")
-            : (d.displayName || "Unknown");
+          const u = ctx.usersById.get(d.uid);
+          const name = u ? nameOf(u) : (d.displayName || "Unknown");
           scorers.push({ uid: d.uid, name, pts });
         }
       }
       if (scorers.length === 0) continue;
 
-      // Get league standings (league members only, ordered by total points)
-      const allUsersSnap = await db.collection("users").orderBy("points", "desc").get();
-      const leagueStandings = allUsersSnap.docs
-        .filter(d => memberUids.includes(d.id))
-        .map((d, i) => ({ uid: d.id, rank: i + 1, totalPts: d.data().points || 0 }));
+      // League standings (members only), same ordering as before —
+      // sourced from the cached, points-sorted user list now instead of a
+      // fresh full-collection query.
+      const leagueStandings = ctx.usersByPoints
+        .filter((u) => memberUids.includes(u.id))
+        .map((u, i) => ({ uid: u.id, rank: i + 1, totalPts: u.points || 0 }));
 
       const target = pickRoastTarget(scorers, leagueStandings);
-
-      const targetStanding = leagueStandings.find(s => s.uid === target.uid);
+      const targetStanding = leagueStandings.find((s) => s.uid === target.uid);
       const rank = targetStanding?.rank ?? 1;
       const totalPts = targetStanding?.totalPts ?? 0;
 
@@ -116,7 +135,7 @@ export async function generateRoastsForLeagues(db, matchId, matchName, finalScor
       });
 
       console.log(
-        `  🔥 Roast ${existingRoast.exists ? "updated" : "stored"} [${leagueId}] ${matchName} → ${target.name}`
+        `  🔥 Roast ${existingRoast.exists ? "updated" : "stored"} [${league.id}] ${matchName} → ${target.name}`
       );
     }
   } catch (err) {
@@ -131,11 +150,8 @@ export async function generateRoastsForLeagues(db, matchId, matchName, finalScor
 // that leader actually scored points on it; otherwise the roast template
 // language ("+{pts} from {match}") would be citing points that don't
 // exist. If the leader didn't predict the match, or predicted it and got
-// it wrong, no global roast is generated for that match at all (same
-// silent skip as when nobody scores).
-const nameOf = (r) => r.nickname || r.displayName || "Unknown";
-
-export async function generateGlobalRoast(db, matchId, matchName, finalScore, { force = false } = {}) {
+// it wrong, no global roast is generated for that match at all.
+export async function generateGlobalRoast(db, ctx, matchId, matchName, finalScore, preds, { force = false } = {}) {
   try {
     const roastRef = db.collection("globalRoasts").doc(matchId);
     const existing = await roastRef.get();
@@ -155,36 +171,29 @@ export async function generateGlobalRoast(db, matchId, matchName, finalScore, { 
       }
     };
 
+    if (ctx.usersByPoints.length === 0) return disqualify("no users");
+
     // Same tiebreak chain as Leaderboard.jsx (points → tbDistance → exact →
     // name) so "the overall leader" here can never disagree with who's
-    // actually shown as #1 on the leaderboard. limit(10) is a generous
-    // buffer — only matters if several players are tied at the very top.
-    const topSnap = await db.collection("users").orderBy("points", "desc").limit(10).get();
-    if (topSnap.empty) return disqualify("no users");
-    const candidates = topSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    candidates.sort(
+    // actually shown as #1 on the leaderboard. Only the top slice needs
+    // the full tiebreak applied — ctx.usersByPoints is already points-
+    // sorted, this just resolves ties at the very top. Sorting a copy of
+    // the slice, not ctx.usersByPoints itself, so the league-standings
+    // path above keeps its original (points-only) ordering untouched.
+    const top = [...ctx.usersByPoints.slice(0, 10)].sort(
       (a, b) =>
         (b.points ?? 0) - (a.points ?? 0) ||
         (a.tbDistance ?? Infinity) - (b.tbDistance ?? Infinity) ||
         (b.exact ?? 0) - (a.exact ?? 0) ||
         nameOf(a).localeCompare(nameOf(b), undefined, { numeric: true, sensitivity: "base" })
     );
-    const leader = candidates[0];
+    const leader = top[0];
 
-    // Predictions are stored with doc id "<uid>_<matchId>" — direct lookup,
-    // no need to scan every prediction for this match.
-    const predDoc = await db.doc(`predictions/${leader.id}_${matchId}`).get();
-    if (!predDoc.exists) return disqualify("leader didn't predict this match");
-    const d = predDoc.data();
-    if (d.home == null) return disqualify("leader's prediction incomplete");
+    const leaderPred = preds.find((d) => d.uid === leader.id);
+    if (!leaderPred) return disqualify("leader didn't predict this match");
 
     const [homeScore, awayScore] = finalScore.split("-").map(Number);
-    let pts = 0;
-    if (d.home === homeScore && d.away === awayScore) {
-      pts = 5;
-    } else if (Math.sign(d.home - d.away) === Math.sign(homeScore - awayScore)) {
-      pts = 3;
-    }
+    const pts = scorePrediction(leaderPred, homeScore, awayScore);
     if (pts === 0) return disqualify("leader scored 0 on this match"); // keep the roast text honest
 
     const name = nameOf(leader);
