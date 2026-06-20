@@ -27,7 +27,7 @@ export const ordinal = (n) => {
 };
 
 // ── Per-league roast — fires once per finished match, per league ──
-export async function generateRoastsForLeagues(db, matchId, matchName, finalScore) {
+export async function generateRoastsForLeagues(db, matchId, matchName, finalScore, { force = false } = {}) {
   try {
     const leaguesSnap = await db.collection("groups").get();
     if (leaguesSnap.empty) return;
@@ -35,12 +35,15 @@ export async function generateRoastsForLeagues(db, matchId, matchName, finalScor
     for (const leagueDoc of leaguesSnap.docs) {
       const leagueId = leagueDoc.id;
 
-      // Skip if roast already exists for this match in this league
-      const existingRoast = await db
+      const roastRef = db
         .collection("groups").doc(leagueId)
-        .collection("matchRoasts").doc(matchId)
-        .get();
-      if (existingRoast.exists) continue;
+        .collection("matchRoasts").doc(matchId);
+      const existingRoast = await roastRef.get();
+      // Normally: skip if already generated. With force=true (used by the
+      // backfill script's --force mode), recompute and overwrite anyway —
+      // needed to retroactively fix roasts generated under an older,
+      // buggy version of the targeting logic.
+      if (existingRoast.exists && !force) continue;
 
       const leagueData = leagueDoc.data();
       const memberUids = leagueData.members || [];
@@ -98,19 +101,23 @@ export async function generateRoastsForLeagues(db, matchId, matchName, finalScor
         totalPts,
       });
 
-      await db
-        .collection("groups").doc(leagueId)
-        .collection("matchRoasts").doc(matchId)
-        .set({
-          roastText,
-          targetName:  target.name,
-          targetUid:   target.uid,
-          matchName,
-          finalScore,
-          generatedAt: new Date().toISOString(),
-        });
+      await roastRef.set({
+        roastText,
+        targetName:  target.name,
+        targetUid:   target.uid,
+        matchName,
+        finalScore,
+        // Preserve the original generation time on a forced overwrite, so
+        // re-running --force doesn't scramble "most recent roast" ordering
+        // on the homepage — only the content (target/text) changes.
+        generatedAt: existingRoast.exists
+          ? existingRoast.data().generatedAt
+          : new Date().toISOString(),
+      });
 
-      console.log(`  🔥 Roast stored [${leagueId}] ${matchName} → ${target.name}`);
+      console.log(
+        `  🔥 Roast ${existingRoast.exists ? "updated" : "stored"} [${leagueId}] ${matchName} → ${target.name}`
+      );
     }
   } catch (err) {
     console.error("Roast generation skipped (non-fatal):", err.message);
@@ -120,10 +127,11 @@ export async function generateRoastsForLeagues(db, matchId, matchName, finalScor
 // ── Global roast — one site-wide roast per finished match, for the
 // homepage hero. Public, not tied to any league: looks at the GLOBAL
 // leaderboard and ALL predictions for the match.
-export async function generateGlobalRoast(db, matchId, matchName, finalScore) {
+export async function generateGlobalRoast(db, matchId, matchName, finalScore, { force = false } = {}) {
   try {
-    const existing = await db.collection("globalRoasts").doc(matchId).get();
-    if (existing.exists) return;
+    const roastRef = db.collection("globalRoasts").doc(matchId);
+    const existing = await roastRef.get();
+    if (existing.exists && !force) return;
 
     const predsSnap = await db
       .collection("predictions")
@@ -174,16 +182,16 @@ export async function generateGlobalRoast(db, matchId, matchName, finalScore) {
       totalPts,
     });
 
-    await db.collection("globalRoasts").doc(matchId).set({
+    await roastRef.set({
       roastText,
       targetName:  target.name,
       targetUid:   target.uid,
       matchName,
       finalScore,
-      generatedAt: new Date().toISOString(),
+      generatedAt: existing.exists ? existing.data().generatedAt : new Date().toISOString(),
     });
 
-    console.log(`  🔥 Global roast stored: ${matchName} → ${target.name}`);
+    console.log(`  🔥 Global roast ${existing.exists ? "updated" : "stored"}: ${matchName} → ${target.name}`);
   } catch (err) {
     console.error("Global roast generation skipped (non-fatal):", err.message);
   }
