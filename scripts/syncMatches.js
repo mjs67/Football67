@@ -13,6 +13,7 @@ import { readFileSync, existsSync } from "node:fs";
 import admin from "firebase-admin";
 import { recomputeLeaderboard } from "./recompute.js";
 import { generateRoastsForLeagues, generateGlobalRoast } from "./roastGeneration.js";
+import { venueFromSchedule } from "./wc2026Venues.js";
 
 if (existsSync("./serviceAccount.json")) {
   const sa = JSON.parse(readFileSync("./serviceAccount.json", "utf8"));
@@ -204,20 +205,46 @@ try {
 } catch {
   /* optional file */
 }
-let venueMissingFromApi = 0; // API gave us no venue string at all for this match
-let venueUnmatched = new Set(); // API gave a venue string, but it's not in venues.json
-function venueLabel(m) {
-  if (!m.venue) {
-    venueMissingFromApi++;
-    return null;
-  }
-  const lower = m.venue.toLowerCase();
+function placeFor(rawVenue) {
+  const lower = rawVenue.toLowerCase();
   for (const [keyword, place] of Object.entries(venuePlaces)) {
     if (keyword.startsWith("_")) continue;
-    if (lower.includes(keyword)) return `${m.venue} · ${place}`;
+    if (lower.includes(keyword)) return place;
   }
-  venueUnmatched.add(m.venue);
-  return m.venue;
+  return null;
+}
+
+let venueFromApiCount = 0;
+let venueFromScheduleCount = 0;
+let venueUnresolvedCount = 0;
+let venueUnmatched = new Set(); // a raw venue string (from either source) didn't match any venues.json keyword
+
+function venueLabel(m) {
+  // Prefer the API's own venue field when present — keeps this forward
+  // compatible if football-data.org ever starts sending it on this tier.
+  let raw = m.venue || null;
+  if (raw) {
+    venueFromApiCount++;
+  } else {
+    raw = venueFromSchedule(
+      m.homeTeam.shortName || m.homeTeam.name,
+      m.awayTeam.shortName || m.awayTeam.name,
+      m.utcDate
+    );
+    if (raw) venueFromScheduleCount++;
+  }
+
+  if (!raw) {
+    venueUnresolvedCount++;
+    return null;
+  }
+
+  const place = placeFor(raw);
+  if (!place) {
+    venueUnmatched.add(raw);
+    return raw;
+  }
+  return `${raw} · ${place}`;
 }
 const compName = (data.competition?.name || COMP).replace(/^FIFA /, "");
 
@@ -264,16 +291,17 @@ for (const m of data.matches) {
 }
 await batch.commit();
 console.log(`Upserted ${writes} matches (${settled} finished).`);
-if (venueMissingFromApi > 0) {
+console.log(
+  `Venues: ${venueFromApiCount} from football-data.org, ${venueFromScheduleCount} from the static WC2026 schedule, ${venueUnresolvedCount} unresolved.`
+);
+if (venueUnresolvedCount > 0) {
   console.log(
-    `⚠ ${venueMissingFromApi}/${data.matches.length} matches had no "venue" field from football-data.org — ` +
-    `this is the football-data.org account/endpoint, not venues.json (it never even ran the lookup). ` +
-    "Check your account tier or whether this competition publishes venue data on the list endpoint."
+    `⚠ ${venueUnresolvedCount} match(es) got no venue from either source — likely a friendly/non-WC fixture outside scripts/wc2026Schedule.json, or a kickoff time that doesn't line up with the schedule's tolerance window.`
   );
 }
 if (venueUnmatched.size > 0) {
   console.log(
-    `⚠ venue string(s) from the API didn't match any keyword in scripts/venues.json: ` +
+    `⚠ venue string(s) didn't match any keyword in scripts/venues.json: ` +
     [...venueUnmatched].map((v) => `"${v}"`).join(", ") +
     ". Add a keyword entry for these so they resolve to a city/country label."
   );

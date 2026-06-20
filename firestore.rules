@@ -90,6 +90,16 @@ service cloud.firestore {
           )
         );
       allow delete: if request.auth != null && resource.data.ownerUid == request.auth.uid;
+
+      // Per-match roasts for this league. Firestore rules don't cascade
+      // from the parent /groups/{gid} rule above — without this explicit
+      // block, reads here fall through to default-deny regardless of the
+      // group-level read rule. Same access policy as the group itself
+      // (any signed-in user); script-only write, same as globalRoasts.
+      match /matchRoasts/{matchId} {
+        allow read: if request.auth != null;
+        allow write: if false;
+      }
     }
 
     // Tiebreaker question/answer: public read, script-only write
