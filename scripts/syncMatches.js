@@ -359,35 +359,60 @@ if (missingRatings.size > 0) {
 // Players with autoPickOn get a default 1–1 lodged for any match kicking off
 // within the next 40 minutes that they haven't predicted. Runs every sync
 // (every 30 min), so nobody with the toggle on ever gets blanked.
-const soonSnap = await db
-  .collection("matches")
-  .where("status", "==", "upcoming")
-  .where("kickoff", ">", admin.firestore.Timestamp.now())
-  .where("kickoff", "<", admin.firestore.Timestamp.fromMillis(Date.now() + 40 * 60000))
-  .get();
-if (!soonSnap.empty) {
-  const optedIn = await db.collection("users").where("autoPickOn", "==", true).get();
-  let autoPicked = 0;
-  for (const u of optedIn.docs) {
-    for (const m of soonSnap.docs) {
-      const ref = db.doc(`predictions/${u.id}_${m.id}`);
-      if ((await ref.get()).exists) continue;
-      await ref.set({
-        uid: u.id,
-        matchId: m.id,
-        home: 1,
-        away: 1,
-        autoPicked: true,
-        displayName: u.data().displayName || "Anonymous",
-        photoURL: u.data().photoURL || "",
-        updatedAt: admin.firestore.Timestamp.now(),
-      });
-      autoPicked++;
+//
+// Wrapped for the same reason as the roast block above: this must never be
+// able to prevent recomputeLeaderboard() from running below. Missing one
+// auto-pick window is recoverable — the next sync, 30 minutes later, tries
+// again before any of these matches kick off. A leaderboard that silently
+// stops updating is not recoverable the same way.
+try {
+  const soonSnap = await db
+    .collection("matches")
+    .where("status", "==", "upcoming")
+    .where("kickoff", ">", admin.firestore.Timestamp.now())
+    .where("kickoff", "<", admin.firestore.Timestamp.fromMillis(Date.now() + 40 * 60000))
+    .get();
+  if (!soonSnap.empty) {
+    const optedIn = await db.collection("users").where("autoPickOn", "==", true).get();
+    let autoPicked = 0;
+    for (const u of optedIn.docs) {
+      for (const m of soonSnap.docs) {
+        const ref = db.doc(`predictions/${u.id}_${m.id}`);
+        if ((await ref.get()).exists) continue;
+        await ref.set({
+          uid: u.id,
+          matchId: m.id,
+          home: 1,
+          away: 1,
+          autoPicked: true,
+          displayName: u.data().displayName || "Anonymous",
+          photoURL: u.data().photoURL || "",
+          updatedAt: admin.firestore.Timestamp.now(),
+        });
+        autoPicked++;
+      }
     }
+    if (autoPicked) console.log(`Auto-picked 1–1 for ${autoPicked} player-matches.`);
   }
-  if (autoPicked) console.log(`Auto-picked 1–1 for ${autoPicked} player-matches.`);
+} catch (err) {
+  console.error("⚠ Auto-pick safety net skipped this sync (non-fatal — leaderboard recompute still runs below):", err.message);
 }
 
-const players = await recomputeLeaderboard(db);
-console.log(`Leaderboard recomputed for ${players} players.`);
-process.exit(0);
+// Leaderboard recompute — the one step in this script that should NOT fail
+// silently. If it throws (e.g. quota still exhausted), this logs a clear,
+// readable message instead of letting an uncaught Firestore exception dump
+// a full stack trace, but still exits non-zero so the workflow visibly
+// fails. Matches/venues from this run are already committed regardless —
+// only points are stale until this succeeds on a later run.
+try {
+  const players = await recomputeLeaderboard(db);
+  console.log(`Leaderboard recomputed for ${players} players.`);
+  process.exit(0);
+} catch (err) {
+  console.error(`\n✗ Leaderboard recompute FAILED: ${err.message}`);
+  console.error(
+    "Matches/venues synced above are already saved — only points are stale from this run. " +
+    "Will retry automatically on the next scheduled sync, or re-run manually once the issue clears."
+  );
+  process.exit(1);
+}
