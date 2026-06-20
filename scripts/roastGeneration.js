@@ -125,73 +125,77 @@ export async function generateRoastsForLeagues(db, matchId, matchName, finalScor
 }
 
 // ── Global roast — one site-wide roast per finished match, for the
-// homepage hero. Public, not tied to any league: looks at the GLOBAL
-// leaderboard and ALL predictions for the match.
+// homepage hero. Different rule from the per-league version: this always
+// targets the current #1 OVERALL leaderboard player, full stop — not
+// "whoever did best on this match." But it only fires for a match where
+// that leader actually scored points on it; otherwise the roast template
+// language ("+{pts} from {match}") would be citing points that don't
+// exist. If the leader didn't predict the match, or predicted it and got
+// it wrong, no global roast is generated for that match at all (same
+// silent skip as when nobody scores).
+const nameOf = (r) => r.nickname || r.displayName || "Unknown";
+
 export async function generateGlobalRoast(db, matchId, matchName, finalScore, { force = false } = {}) {
   try {
     const roastRef = db.collection("globalRoasts").doc(matchId);
     const existing = await roastRef.get();
     if (existing.exists && !force) return;
 
-    const predsSnap = await db
-      .collection("predictions")
-      .where("matchId", "==", matchId)
-      .get();
-    if (predsSnap.empty) return;
+    // Same tiebreak chain as Leaderboard.jsx (points → tbDistance → exact →
+    // name) so "the overall leader" here can never disagree with who's
+    // actually shown as #1 on the leaderboard. limit(10) is a generous
+    // buffer — only matters if several players are tied at the very top.
+    const topSnap = await db.collection("users").orderBy("points", "desc").limit(10).get();
+    if (topSnap.empty) return;
+    const candidates = topSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    candidates.sort(
+      (a, b) =>
+        (b.points ?? 0) - (a.points ?? 0) ||
+        (a.tbDistance ?? Infinity) - (b.tbDistance ?? Infinity) ||
+        (b.exact ?? 0) - (a.exact ?? 0) ||
+        nameOf(a).localeCompare(nameOf(b), undefined, { numeric: true, sensitivity: "base" })
+    );
+    const leader = candidates[0];
+
+    // Predictions are stored with doc id "<uid>_<matchId>" — direct lookup,
+    // no need to scan every prediction for this match.
+    const predDoc = await db.doc(`predictions/${leader.id}_${matchId}`).get();
+    if (!predDoc.exists) return;
+    const d = predDoc.data();
+    if (d.home == null) return;
 
     const [homeScore, awayScore] = finalScore.split("-").map(Number);
-    const scorers = [];
-    for (const predDoc of predsSnap.docs) {
-      const d = predDoc.data();
-      if (d.home == null) continue;
-      let pts = 0;
-      if (d.home === homeScore && d.away === awayScore) {
-        pts = 5;
-      } else if (Math.sign(d.home - d.away) === Math.sign(homeScore - awayScore)) {
-        pts = 3;
-      }
-      if (pts > 0) {
-        const userDoc = await db.collection("users").doc(d.uid).get();
-        const name = userDoc.exists
-          ? (userDoc.data().nickname || userDoc.data().displayName || d.displayName || "Unknown")
-          : (d.displayName || "Unknown");
-        scorers.push({ uid: d.uid, name, pts });
-      }
+    let pts = 0;
+    if (d.home === homeScore && d.away === awayScore) {
+      pts = 5;
+    } else if (Math.sign(d.home - d.away) === Math.sign(homeScore - awayScore)) {
+      pts = 3;
     }
-    if (scorers.length === 0) return;
+    if (pts === 0) return; // leader didn't score on this one — keep the roast text honest
 
-    const allUsersSnap = await db.collection("users").orderBy("points", "desc").get();
-    const standings = allUsersSnap.docs.map((d, i) => ({
-      uid: d.id,
-      rank: i + 1,
-      totalPts: d.data().points || 0,
-    }));
-
-    const target = pickRoastTarget(scorers, standings);
-    const targetStanding = standings.find((s) => s.uid === target.uid);
-    const rank = targetStanding?.rank ?? 1;
-    const totalPts = targetStanding?.totalPts ?? 0;
+    const name = nameOf(leader);
+    const totalPts = leader.points || 0;
 
     const roastText = generateRoast({
       matchId,
-      name:      target.name,
-      pts:       target.pts,
+      name,
+      pts,
       match:     matchName,
       score:     finalScore,
-      leaguePos: ordinal(rank),
+      leaguePos: ordinal(1), // by definition — this function only ever targets #1
       totalPts,
     });
 
     await roastRef.set({
       roastText,
-      targetName:  target.name,
-      targetUid:   target.uid,
+      targetName:  name,
+      targetUid:   leader.id,
       matchName,
       finalScore,
       generatedAt: existing.exists ? existing.data().generatedAt : new Date().toISOString(),
     });
 
-    console.log(`  🔥 Global roast ${existing.exists ? "updated" : "stored"}: ${matchName} → ${target.name}`);
+    console.log(`  🔥 Global roast ${existing.exists ? "updated" : "stored"}: ${matchName} → ${name} (overall #1)`);
   } catch (err) {
     console.error("Global roast generation skipped (non-fatal):", err.message);
   }
