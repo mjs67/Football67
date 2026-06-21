@@ -12,8 +12,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import admin from "firebase-admin";
 import { recomputeLeaderboard } from "./recompute.js";
-import { generateRoastsForLeagues, generateGlobalRoast, buildRoastContext } from "./roastGeneration.js";
-import { venueFromSchedule } from "./wc2026Venues.js";
+import { generateRoast } from "./roastTemplates.js";
 
 if (existsSync("./serviceAccount.json")) {
   const sa = JSON.parse(readFileSync("./serviceAccount.json", "utf8"));
@@ -205,46 +204,14 @@ try {
 } catch {
   /* optional file */
 }
-function placeFor(rawVenue) {
-  const lower = rawVenue.toLowerCase();
+function venueLabel(m) {
+  if (!m.venue) return null;
+  const lower = m.venue.toLowerCase();
   for (const [keyword, place] of Object.entries(venuePlaces)) {
     if (keyword.startsWith("_")) continue;
-    if (lower.includes(keyword)) return place;
+    if (lower.includes(keyword)) return `${m.venue} · ${place}`;
   }
-  return null;
-}
-
-let venueFromApiCount = 0;
-let venueFromScheduleCount = 0;
-let venueUnresolvedCount = 0;
-let venueUnmatched = new Set(); // a raw venue string (from either source) didn't match any venues.json keyword
-
-function venueLabel(m) {
-  // Prefer the API's own venue field when present — keeps this forward
-  // compatible if football-data.org ever starts sending it on this tier.
-  let raw = m.venue || null;
-  if (raw) {
-    venueFromApiCount++;
-  } else {
-    raw = venueFromSchedule(
-      m.homeTeam.shortName || m.homeTeam.name,
-      m.awayTeam.shortName || m.awayTeam.name,
-      m.utcDate
-    );
-    if (raw) venueFromScheduleCount++;
-  }
-
-  if (!raw) {
-    venueUnresolvedCount++;
-    return null;
-  }
-
-  const place = placeFor(raw);
-  if (!place) {
-    venueUnmatched.add(raw);
-    return raw;
-  }
-  return `${raw} · ${place}`;
+  return m.venue;
 }
 const compName = (data.competition?.name || COMP).replace(/^FIFA /, "");
 
@@ -268,11 +235,6 @@ for (const m of data.matches) {
       homeFlag: m.homeTeam.crest || "⚽",
       awayFlag: m.awayTeam.crest || "⚽",
       competition: stageLabel(m) ? `${compName} · ${stageLabel(m)}` : compName,
-      // Stage Tables: group vs knockout, for a leaderboard that resets at
-      // the natural tournament checkpoint instead of only ever accumulating.
-      // m.group is set for group-stage matches and null once the knockout
-      // bracket starts — the API already tells us this, no extra lookup.
-      phase: m.group ? "group" : "knockout",
       venue: venueLabel(m),
       kickoff: admin.firestore.Timestamp.fromDate(new Date(m.utcDate)),
       status: finished ? "finished" : "upcoming",
@@ -296,57 +258,14 @@ for (const m of data.matches) {
 }
 await batch.commit();
 console.log(`Upserted ${writes} matches (${settled} finished).`);
-console.log(
-  `Venues: ${venueFromApiCount} from football-data.org, ${venueFromScheduleCount} from the static WC2026 schedule, ${venueUnresolvedCount} unresolved.`
-);
-if (venueUnresolvedCount > 0) {
-  console.log(
-    `⚠ ${venueUnresolvedCount} match(es) got no venue from either source — likely a friendly/non-WC fixture outside scripts/wc2026Schedule.json, or a kickoff time that doesn't line up with the schedule's tolerance window.`
-  );
-}
-if (venueUnmatched.size > 0) {
-  console.log(
-    `⚠ venue string(s) didn't match any keyword in scripts/venues.json: ` +
-    [...venueUnmatched].map((v) => `"${v}"`).join(", ") +
-    ". Add a keyword entry for these so they resolve to a city/country label."
-  );
-}
 
-// Generate roasts for all finished matches in this sync.
-// Context (leagues + full users list) is built ONCE for the whole run, and
-// each match's predictions are fetched once and shared between the
-// per-league and global generators — see roastGeneration.js for why this
-// matters (it's the difference between ~10 reads and ~1000+ reads here).
-//
-// Wrapped in its own try/catch: roast generation is a nice-to-have, not
-// core functionality, and must never be able to take the rest of the sync
-// down with it. Without this, a transient Firestore failure here (quota
-// exhaustion, a network blip, anything) throws uncaught and the process
-// exits before ever reaching recomputeLeaderboard() below — meaning the
-// leaderboard silently stops updating even though match/venue sync earlier
-// in this run already succeeded and committed. The individual generator
-// functions in roastGeneration.js already catch their own errors; this
-// closes the gap around buildRoastContext() and the predictions fetch,
-// which sit outside those.
-const finishedThisRun = data.matches.filter((m) => m.status === "FINISHED");
-if (finishedThisRun.length > 0) {
-  try {
-    const roastCtx = await buildRoastContext(db);
-    for (const m of finishedThisRun) {
-      const matchId = `fd_${m.id}`;
-      const matchName = `${m.homeTeam.shortName || m.homeTeam.name} v ${m.awayTeam.shortName || m.awayTeam.name}`;
-      const finalScore = `${m.score.fullTime.home}-${m.score.fullTime.away}`;
-      const predsSnap = await db.collection("predictions").where("matchId", "==", matchId).get();
-      const preds = predsSnap.docs.map((d) => d.data());
-      await generateRoastsForLeagues(db, roastCtx, matchId, matchName, finalScore, preds);
-      await generateGlobalRoast(db, roastCtx, matchId, matchName, finalScore, preds);
-    }
-  } catch (err) {
-    console.error(
-      "⚠ Roast generation skipped for this entire sync (non-fatal — leaderboard recompute still runs below):",
-      err.message
-    );
-  }
+// Generate roasts for all finished matches in this sync
+for (const m of data.matches) {
+  if (m.status !== "FINISHED") continue;
+  const matchId = `fd_${m.id}`;
+  const matchName = `${m.homeTeam.shortName || m.homeTeam.name} v ${m.awayTeam.shortName || m.awayTeam.name}`;
+  const finalScore = `${m.score.fullTime.home}-${m.score.fullTime.away}`;
+  await generateRoastsForLeagues(matchId, matchName, finalScore);
 }
 if (missingRatings.size > 0) {
   console.log(
@@ -355,64 +274,153 @@ if (missingRatings.size > 0) {
   );
 }
 
-// ── Auto-pick safety net ──
-// Players with autoPickOn get a default 1–1 lodged for any match kicking off
-// within the next 40 minutes that they haven't predicted. Runs every sync
-// (every 30 min), so nobody with the toggle on ever gets blanked.
-//
-// Wrapped for the same reason as the roast block above: this must never be
-// able to prevent recomputeLeaderboard() from running below. Missing one
-// auto-pick window is recoverable — the next sync, 30 minutes later, tries
-// again before any of these matches kick off. A leaderboard that silently
-// stops updating is not recoverable the same way.
-try {
-  const soonSnap = await db
-    .collection("matches")
-    .where("status", "==", "upcoming")
-    .where("kickoff", ">", admin.firestore.Timestamp.now())
-    .where("kickoff", "<", admin.firestore.Timestamp.fromMillis(Date.now() + 40 * 60000))
-    .get();
-  if (!soonSnap.empty) {
-    const optedIn = await db.collection("users").where("autoPickOn", "==", true).get();
-    let autoPicked = 0;
-    for (const u of optedIn.docs) {
-      for (const m of soonSnap.docs) {
-        const ref = db.doc(`predictions/${u.id}_${m.id}`);
-        if ((await ref.get()).exists) continue;
-        await ref.set({
-          uid: u.id,
-          matchId: m.id,
-          home: 1,
-          away: 1,
-          autoPicked: true,
-          displayName: u.data().displayName || "Anonymous",
-          photoURL: u.data().photoURL || "",
-          updatedAt: admin.firestore.Timestamp.now(),
-        });
-        autoPicked++;
+// ── Roast generation — fires once per finished match, per league ──
+async function generateRoastsForLeagues(matchId, matchName, finalScore) {
+  try {
+    const leaguesSnap = await db.collection("groups").get();
+    if (leaguesSnap.empty) return;
+
+    for (const leagueDoc of leaguesSnap.docs) {
+      const leagueId = leagueDoc.id;
+
+      // Skip if roast already exists for this match in this league
+      const existingRoast = await db
+        .collection("groups").doc(leagueId)
+        .collection("matchRoasts").doc(matchId)
+        .get();
+      if (existingRoast.exists) continue;
+
+      const leagueData = leagueDoc.data();
+      const memberUids = leagueData.members || [];
+      if (memberUids.length === 0) continue;
+
+      // Get all predictions for this match
+      const predsSnap = await db
+        .collection("predictions")
+        .where("matchId", "==", matchId)
+        .get();
+      if (predsSnap.empty) continue;
+
+      // Filter to league members who scored points on this match
+      const [homeScore, awayScore] = finalScore.split("-").map(Number);
+      const scorers = [];
+      for (const predDoc of predsSnap.docs) {
+        const d = predDoc.data();
+        if (!memberUids.includes(d.uid)) continue;
+        if (d.home == null) continue;
+        let pts = 0;
+        if (d.home === homeScore && d.away === awayScore) {
+          pts = 5;
+        } else if (Math.sign(d.home - d.away) === Math.sign(homeScore - awayScore)) {
+          pts = 3;
+        }
+        if (pts > 0) {
+          const userDoc = await db.collection("users").doc(d.uid).get();
+          const name = userDoc.exists
+            ? (userDoc.data().nickname || userDoc.data().displayName || d.displayName || "Unknown")
+            : (d.displayName || "Unknown");
+          scorers.push({ uid: d.uid, name, pts });
+        }
       }
+      if (scorers.length === 0) continue;
+
+      // Get league standings (league members only, ordered by total points)
+      const allUsersSnap = await db.collection("users").orderBy("points", "desc").get();
+      const leagueStandings = allUsersSnap.docs
+        .filter(d => memberUids.includes(d.id))
+        .map((d, i) => ({ uid: d.id, rank: i + 1, totalPts: d.data().points || 0 }));
+
+      // Pick roast target: league leader if they scored, otherwise top match scorer
+      let target;
+      if (scorers.length === 1) {
+        target = scorers[0];
+      } else {
+        const leaderWhoScored = leagueStandings.find(s =>
+          scorers.some(sc => sc.uid === s.uid)
+        );
+        target = scorers.find(sc => sc.uid === leaderWhoScored?.uid)
+          ?? scorers.sort((a, b) => b.pts - a.pts)[0];
+      }
+
+      const targetStanding = leagueStandings.find(s => s.uid === target.uid);
+      const rank = targetStanding?.rank ?? 1;
+      const totalPts = targetStanding?.totalPts ?? 0;
+
+      const ordinal = n => {
+        const s = ["th", "st", "nd", "rd"];
+        const v = n % 100;
+        return n + (s[(v - 20) % 10] || s[v] || s[0]);
+      };
+
+      const roastText = generateRoast({
+        matchId,
+        name:      target.name,
+        pts:       target.pts,
+        match:     matchName,
+        score:     finalScore,
+        leaguePos: ordinal(rank),
+        totalPts,
+      });
+
+      await db
+        .collection("groups").doc(leagueId)
+        .collection("matchRoasts").doc(matchId)
+        .set({
+          roastText,
+          targetName:  target.name,
+          targetUid:   target.uid,
+          matchName,
+          finalScore,
+          generatedAt: new Date().toISOString(),
+        });
+
+      console.log(`  🔥 Roast stored [${leagueId}] ${matchName} → ${target.name}`);
     }
-    if (autoPicked) console.log(`Auto-picked 1–1 for ${autoPicked} player-matches.`);
+  } catch (err) {
+    console.error("Roast generation skipped (non-fatal):", err.message);
   }
-} catch (err) {
-  console.error("⚠ Auto-pick safety net skipped this sync (non-fatal — leaderboard recompute still runs below):", err.message);
 }
 
-// Leaderboard recompute — the one step in this script that should NOT fail
-// silently. If it throws (e.g. quota still exhausted), this logs a clear,
-// readable message instead of letting an uncaught Firestore exception dump
-// a full stack trace, but still exits non-zero so the workflow visibly
-// fails. Matches/venues from this run are already committed regardless —
-// only points are stale until this succeeds on a later run.
-try {
-  const players = await recomputeLeaderboard(db);
-  console.log(`Leaderboard recomputed for ${players} players.`);
-  process.exit(0);
-} catch (err) {
-  console.error(`\n✗ Leaderboard recompute FAILED: ${err.message}`);
-  console.error(
-    "Matches/venues synced above are already saved — only points are stale from this run. " +
-    "Will retry automatically on the next scheduled sync, or re-run manually once the issue clears."
-  );
-  process.exit(1);
+// ── Auto-pick safety net ──
+// Players with autoPickOn get a default 1–1 lodged for any match kicking off
+// within the next 40 minutes (or already underway but not yet settled) that
+// they haven't predicted. Deliberately has no lower bound on kickoff: GitHub
+// Actions' `schedule:` trigger has no timing SLA and a sync can also fail
+// outright (see fetchWithRetry's process.exit on persistent errors), so a
+// run can land after a match has already kicked off. Without a lower bound,
+// the *next* successful run still catches it as long as the match is still
+// "upcoming" (i.e. not yet reported FINISHED) — a lower bound here meant a
+// single missed/delayed run could permanently skip a match for autopick
+// users, since once kickoff < now they'd never satisfy "kickoff > now"
+// again on any later run.
+const soonSnap = await db
+  .collection("matches")
+  .where("status", "==", "upcoming")
+  .where("kickoff", "<", admin.firestore.Timestamp.fromMillis(Date.now() + 40 * 60000))
+  .get();
+if (!soonSnap.empty) {
+  const optedIn = await db.collection("users").where("autoPickOn", "==", true).get();
+  let autoPicked = 0;
+  for (const u of optedIn.docs) {
+    for (const m of soonSnap.docs) {
+      const ref = db.doc(`predictions/${u.id}_${m.id}`);
+      if ((await ref.get()).exists) continue;
+      await ref.set({
+        uid: u.id,
+        matchId: m.id,
+        home: 1,
+        away: 1,
+        autoPicked: true,
+        displayName: u.data().displayName || "Anonymous",
+        photoURL: u.data().photoURL || "",
+        updatedAt: admin.firestore.Timestamp.now(),
+      });
+      autoPicked++;
+    }
+  }
+  if (autoPicked) console.log(`Auto-picked 1–1 for ${autoPicked} player-matches.`);
 }
+
+const players = await recomputeLeaderboard(db);
+console.log(`Leaderboard recomputed for ${players} players.`);
+process.exit(0);
