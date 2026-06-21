@@ -203,7 +203,7 @@ export default function App() {
           <br />
           <em>Before the whistle.</em>
         </h1>
-        <p className="hero-roast-tagline">Win gets you Roasted! 🔥</p>
+        <p className="hero-roast-tagline">Correct Result gets you Roasted! 🔥</p>
         <p className="hero-sub">
           Lock in a scoreline for every fixture before kickoff. Exact score
           pays <b>5&nbsp;pts</b>, the right result pays <b>3&nbsp;pts</b>.
