@@ -12,7 +12,8 @@
 import { readFileSync, existsSync } from "node:fs";
 import admin from "firebase-admin";
 import { recomputeLeaderboard } from "./recompute.js";
-import { generateRoast } from "./roastTemplates.js";
+import { buildRoastContext, generateRoastsForLeagues, generateGlobalRoast } from "./roastGeneration.js";
+import { venueFromSchedule } from "./wc2026Venues.js";
 
 if (existsSync("./serviceAccount.json")) {
   const sa = JSON.parse(readFileSync("./serviceAccount.json", "utf8"));
@@ -205,13 +206,23 @@ try {
   /* optional file */
 }
 function venueLabel(m) {
-  if (!m.venue) return null;
-  const lower = m.venue.toLowerCase();
+  // football-data.org doesn't return a `venue` field for WC2026 matches at
+  // all (confirmed 104/104) — fall back to the static FIFA schedule, matched
+  // by kickoff time (+ teams where known), before giving up.
+  const raw =
+    m.venue ||
+    venueFromSchedule(
+      m.homeTeam.shortName || m.homeTeam.name,
+      m.awayTeam.shortName || m.awayTeam.name,
+      m.utcDate
+    );
+  if (!raw) return null;
+  const lower = raw.toLowerCase();
   for (const [keyword, place] of Object.entries(venuePlaces)) {
     if (keyword.startsWith("_")) continue;
-    if (lower.includes(keyword)) return `${m.venue} · ${place}`;
+    if (lower.includes(keyword)) return `${raw} · ${place}`;
   }
-  return m.venue;
+  return raw;
 }
 const compName = (data.competition?.name || COMP).replace(/^FIFA /, "");
 
@@ -259,126 +270,42 @@ for (const m of data.matches) {
 await batch.commit();
 console.log(`Upserted ${writes} matches (${settled} finished).`);
 
-// Generate roasts for all finished matches in this sync
-for (const m of data.matches) {
-  if (m.status !== "FINISHED") continue;
-  const matchId = `fd_${m.id}`;
-  const matchName = `${m.homeTeam.shortName || m.homeTeam.name} v ${m.awayTeam.shortName || m.awayTeam.name}`;
-  const finalScore = `${m.score.fullTime.home}-${m.score.fullTime.away}`;
-  await generateRoastsForLeagues(matchId, matchName, finalScore);
+// Recompute the leaderboard now, BEFORE generating roasts — not at the end
+// of the script like before. The homepage roast (generateGlobalRoast,
+// below) targets whoever is #1 on the overall leaderboard, so that check
+// has to run against standings that already include the matches that just
+// finished in this sync. Recomputing afterward would let the homepage
+// roast lag a full sync cycle behind the actual leader.
+const playersAfterSync = await recomputeLeaderboard(db);
+console.log(`Leaderboard recomputed for ${playersAfterSync} players.`);
+
+// Generate roasts for every match that finished in this sync — both the
+// per-league roasts (unchanged logic) and the homepage's site-wide roast.
+// The global roast always targets the CURRENT overall #1 (re-checked here,
+// per finished match, against the leaderboard just recomputed above) —
+// not necessarily the same person from the last roast.
+const finishedThisSync = data.matches.filter((m) => m.status === "FINISHED");
+if (finishedThisSync.length > 0) {
+  const roastCtx = await buildRoastContext(db);
+  for (const m of finishedThisSync) {
+    const matchId = `fd_${m.id}`;
+    const matchName = `${m.homeTeam.shortName || m.homeTeam.name} v ${m.awayTeam.shortName || m.awayTeam.name}`;
+    const finalScore = `${m.score.fullTime.home}-${m.score.fullTime.away}`;
+    const predsSnap = await db
+      .collection("predictions")
+      .where("matchId", "==", matchId)
+      .get();
+    const preds = predsSnap.docs.map((d) => d.data());
+    await generateRoastsForLeagues(db, roastCtx, matchId, matchName, finalScore, preds);
+    await generateGlobalRoast(db, roastCtx, matchId, matchName, finalScore, preds);
+  }
 }
+
 if (missingRatings.size > 0) {
   console.log(
     `No rating found for: ${[...missingRatings].join(", ")} — used default ${DEFAULT_RATING}. ` +
     "Add them to scripts/teamRatings.json (use these exact names)."
   );
-}
-
-// ── Roast generation — fires once per finished match, per league ──
-async function generateRoastsForLeagues(matchId, matchName, finalScore) {
-  try {
-    const leaguesSnap = await db.collection("groups").get();
-    if (leaguesSnap.empty) return;
-
-    for (const leagueDoc of leaguesSnap.docs) {
-      const leagueId = leagueDoc.id;
-
-      // Skip if roast already exists for this match in this league
-      const existingRoast = await db
-        .collection("groups").doc(leagueId)
-        .collection("matchRoasts").doc(matchId)
-        .get();
-      if (existingRoast.exists) continue;
-
-      const leagueData = leagueDoc.data();
-      const memberUids = leagueData.members || [];
-      if (memberUids.length === 0) continue;
-
-      // Get all predictions for this match
-      const predsSnap = await db
-        .collection("predictions")
-        .where("matchId", "==", matchId)
-        .get();
-      if (predsSnap.empty) continue;
-
-      // Filter to league members who scored points on this match
-      const [homeScore, awayScore] = finalScore.split("-").map(Number);
-      const scorers = [];
-      for (const predDoc of predsSnap.docs) {
-        const d = predDoc.data();
-        if (!memberUids.includes(d.uid)) continue;
-        if (d.home == null) continue;
-        let pts = 0;
-        if (d.home === homeScore && d.away === awayScore) {
-          pts = 5;
-        } else if (Math.sign(d.home - d.away) === Math.sign(homeScore - awayScore)) {
-          pts = 3;
-        }
-        if (pts > 0) {
-          const userDoc = await db.collection("users").doc(d.uid).get();
-          const name = userDoc.exists
-            ? (userDoc.data().nickname || userDoc.data().displayName || d.displayName || "Unknown")
-            : (d.displayName || "Unknown");
-          scorers.push({ uid: d.uid, name, pts });
-        }
-      }
-      if (scorers.length === 0) continue;
-
-      // Get league standings (league members only, ordered by total points)
-      const allUsersSnap = await db.collection("users").orderBy("points", "desc").get();
-      const leagueStandings = allUsersSnap.docs
-        .filter(d => memberUids.includes(d.id))
-        .map((d, i) => ({ uid: d.id, rank: i + 1, totalPts: d.data().points || 0 }));
-
-      // Pick roast target: league leader if they scored, otherwise top match scorer
-      let target;
-      if (scorers.length === 1) {
-        target = scorers[0];
-      } else {
-        const leaderWhoScored = leagueStandings.find(s =>
-          scorers.some(sc => sc.uid === s.uid)
-        );
-        target = scorers.find(sc => sc.uid === leaderWhoScored?.uid)
-          ?? scorers.sort((a, b) => b.pts - a.pts)[0];
-      }
-
-      const targetStanding = leagueStandings.find(s => s.uid === target.uid);
-      const rank = targetStanding?.rank ?? 1;
-      const totalPts = targetStanding?.totalPts ?? 0;
-
-      const ordinal = n => {
-        const s = ["th", "st", "nd", "rd"];
-        const v = n % 100;
-        return n + (s[(v - 20) % 10] || s[v] || s[0]);
-      };
-
-      const roastText = generateRoast({
-        matchId,
-        name:      target.name,
-        pts:       target.pts,
-        match:     matchName,
-        score:     finalScore,
-        leaguePos: ordinal(rank),
-        totalPts,
-      });
-
-      await db
-        .collection("groups").doc(leagueId)
-        .collection("matchRoasts").doc(matchId)
-        .set({
-          roastText,
-          targetName:  target.name,
-          targetUid:   target.uid,
-          matchName,
-          finalScore,
-          generatedAt: new Date().toISOString(),
-        });
-
-      console.log(`  🔥 Roast stored [${leagueId}] ${matchName} → ${target.name}`);
-    }
-  } catch (err) {
-    console.error("Roast generation skipped (non-fatal):", err.message);
-  }
 }
 
 // ── Auto-pick safety net ──
@@ -421,6 +348,4 @@ if (!soonSnap.empty) {
   if (autoPicked) console.log(`Auto-picked 1–1 for ${autoPicked} player-matches.`);
 }
 
-const players = await recomputeLeaderboard(db);
-console.log(`Leaderboard recomputed for ${players} players.`);
 process.exit(0);

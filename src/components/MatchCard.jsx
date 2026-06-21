@@ -207,7 +207,7 @@ function OddsStrip({ odds, home, away, locked }) {
         <span className="seg away" style={{ flexGrow: pa }}>{pct(pa)}%</span>
       </div>
       <p className="odds-note">
-        Model: most likely {top.h}–{top.a} ({pct(top.p)}%)
+        AI Model: most likely {top.h}–{top.a} ({pct(top.p)}%)
         {!locked && (
           <>
             {" "}· your call {home}–{away} ({pct(yourP)}%)
