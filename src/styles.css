@@ -918,8 +918,22 @@ code {
   padding: 10px 14px;
   margin-bottom: 6px;
 }
-.reveal-head { margin: 0 0 8px; font-size: 13px; color: var(--chalk-60); }
+.reveal-head {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--chalk-60);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .reveal-head b { color: var(--chalk); font-family: var(--display); text-transform: uppercase; letter-spacing: 0.04em; }
+.reveal-share-btn {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 5px;
+  flex-shrink: 0;
+}
 .reveal-ft { color: var(--volt); font-family: var(--numeral); font-variant-numeric: tabular-nums; }
 .reveal-live { color: var(--red); font-size: 12px; }
 .reveal-chips { display: flex; flex-wrap: wrap; gap: 6px; }

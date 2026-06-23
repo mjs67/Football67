@@ -270,6 +270,7 @@ function RevealedPicks({ group, members, matches }) {
   );
 
   const [picks, setPicks] = useState(null); // matchId -> Map(uid -> pred)
+  const [sharedMatchId, setSharedMatchId] = useState(null); // { id, mode: 'shared'|'copied' }
 
   useEffect(() => {
     let cancelled = false;
@@ -299,6 +300,37 @@ function RevealedPicks({ group, members, matches }) {
   const memberIds = new Set((group.members || []).slice(0, 50));
   const named = members.filter((r) => memberIds.has(r.id));
 
+  async function shareMatch(m, byUid) {
+    const scoreStr = m.status === "finished"
+      ? `FT ${m.homeScore}–${m.awayScore}`
+      : "● Live";
+
+    const chipLines = named.map((r) => {
+      const p = byUid?.get(r.id);
+      const pts = p ? revealPoints(p, m) : null;
+      const name = (r.nickname || r.displayName || "Anon").split(" ")[0];
+      const pred = p ? `${p.home}–${p.away}` : "—";
+      const ptStr = pts !== null ? ` +${pts}` : "";
+      return `${name} ${pred}${ptStr}`;
+    }).join("  |  ");
+
+    const text = `⚽ ${group.name} — ${m.home} v ${m.away} ${scoreStr}\n${chipLines}\n\nPlay at ${window.location.origin}`;
+
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: `${m.home} v ${m.away} Picks`, text });
+        setSharedMatchId({ id: m.id, mode: "shared" });
+        setTimeout(() => setSharedMatchId(null), 1800);
+      } else {
+        await navigator.clipboard.writeText(text);
+        setSharedMatchId({ id: m.id, mode: "copied" });
+        setTimeout(() => setSharedMatchId(null), 1800);
+      }
+    } catch {
+      // user cancelled share sheet or clipboard unavailable — silently ignore
+    }
+  }
+
   return (
     <div className="reveal">
       <h4 className="reveal-title">Locked-in picks <span>revealed at kickoff</span></h4>
@@ -313,6 +345,15 @@ function RevealedPicks({ group, members, matches }) {
               ) : (
                 <span className="reveal-live"> ● Live</span>
               )}
+              <button
+                className="btn ghost sm reveal-share-btn"
+                onClick={() => shareMatch(m, byUid)}
+                title="Share this match's picks"
+              >
+                {sharedMatchId?.id === m.id
+                  ? sharedMatchId.mode === "copied" ? "Copied ✓" : "Shared ✓"
+                  : "Share"}
+              </button>
             </p>
             <div className="reveal-chips">
               {named.map((r) => {
