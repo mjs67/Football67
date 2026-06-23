@@ -22,9 +22,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
-    # Prevents two scheduled runs overlapping. If a run is already in
-    # progress when the next cron fires, the new one is queued (not
-    # cancelled) so no sync window is ever silently dropped.
     concurrency:
       group: sync-wc2026
       cancel-in-progress: false
@@ -52,10 +49,6 @@ jobs:
           DAYS_AHEAD: "45"
         run: node scripts/syncMatches.js
 
-      - name: Clean up service account
-        if: always()
-        run: rm -f serviceAccount.json
-
       - name: Record sync heartbeat
         if: success()
         env:
@@ -63,3 +56,9 @@ jobs:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           GITHUB_RUN_ID: ${{ github.run_id }}
         run: node scripts/recordSync.js
+
+      # Cleanup runs last so both syncMatches.js and recordSync.js
+      # have access to serviceAccount.json. still runs on failure.
+      - name: Clean up service account
+        if: always()
+        run: rm -f serviceAccount.json
