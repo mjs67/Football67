@@ -6,6 +6,7 @@ import {
   collection,
   doc,
   documentId,
+  getDoc,
   getDocs,
   limit,
   onSnapshot,
@@ -327,9 +328,27 @@ function RevealedPicks({ group, members, matches }) {
       cx.closePath();
     }
 
+    // Word-wrap helper: splits text into lines that fit within maxW
+    function wrapText(ctx, text, maxW) {
+      const words = text.split(" ");
+      const lines = [];
+      let line = "";
+      for (const word of words) {
+        const test = line ? `${line} ${word}` : word;
+        if (ctx.measureText(test).width > maxW && line) {
+          lines.push(line);
+          line = word;
+        } else {
+          line = test;
+        }
+      }
+      if (line) lines.push(line);
+      return lines;
+    }
+
     const canvas = document.createElement("canvas");
     canvas.width = W;
-    // Height will be set after measuring chips — use a temp canvas for measurement
+    // Height will be set after measuring chips + roast — use a temp canvas
     const measureCtx = document.createElement("canvas").getContext("2d");
 
     // ── Pre-measure chip widths to compute canvas height ────────
@@ -373,19 +392,41 @@ function RevealedPicks({ group, members, matches }) {
       rowW += (chipRows[chipRows.length - 1].length > 1 ? CHIP_GAP : 0) + chip.w;
     }
 
+    // ── Fetch roast text (only for finished matches) ─────────────
+    let roastText = null;
+    let roastLines = [];
+    const ROAST_FONT = "400 30px 'Barlow', sans-serif";
+    const ROAST_LINE_H = 44;
+    const ROAST_PAD_TOP = 28;
+    const ROAST_PAD_X = 28;
+
+    if (m.status === "finished") {
+      try {
+        const roastSnap = await getDoc(doc(db, "groups", group.id, "matchRoasts", m.id));
+        if (roastSnap.exists()) {
+          roastText = roastSnap.data().roastText;
+          measureCtx.font = ROAST_FONT;
+          roastLines = wrapText(measureCtx, `🔥 ${roastText}`, maxRowW - ROAST_PAD_X * 2);
+        }
+      } catch {
+        // Roast unavailable — draw without it
+      }
+    }
+
+    // ── Compute total canvas height ───────────────────────────────
+    const chipsBottom = CHIP_TOP + chipRows.length * (CHIP_H + CHIP_GAP) - CHIP_GAP;
+    const roastBlockH = roastText
+      ? ROAST_PAD_TOP + roastLines.length * ROAST_LINE_H + 32
+      : 0;
     const FOOTER_H = 88;
-    const H = Math.max(
-      CHIP_TOP + chipRows.length * (CHIP_H + CHIP_GAP) - CHIP_GAP + FOOTER_H,
-      480
-    );
+    const H = Math.max(chipsBottom + roastBlockH + FOOTER_H, 480);
     canvas.height = H;
     const cx = canvas.getContext("2d");
 
-    // Background
+    // ── Background ───────────────────────────────────────────────
     cx.fillStyle = C.night;
     cx.fillRect(0, 0, W, H);
 
-    // Subtle volt top-glow (matches site body background)
     const glow = cx.createRadialGradient(W / 2, -40, 0, W / 2, -40, W * 0.7);
     glow.addColorStop(0, "rgba(200,255,30,0.07)");
     glow.addColorStop(1, "transparent");
@@ -395,13 +436,11 @@ function RevealedPicks({ group, members, matches }) {
     // ── League + match header ────────────────────────────────────
     cx.textBaseline = "middle";
 
-    // League name
     cx.fillStyle = C.chalk60;
     cx.font = "600 30px 'Barlow', sans-serif";
     cx.textAlign = "left";
     cx.fillText(group.name.toUpperCase(), PAD, 72);
 
-    // Match title  HOME v AWAY
     cx.fillStyle = C.chalk;
     cx.font = "700 72px 'Saira Condensed', 'Arial Narrow', sans-serif";
     const matchLabel = `${m.home.toUpperCase()}  v  ${m.away.toUpperCase()}`;
@@ -434,7 +473,6 @@ function RevealedPicks({ group, members, matches }) {
       let x = PAD;
       const y = CHIP_TOP + ri * (CHIP_H + CHIP_GAP);
       row.forEach((chip) => {
-        // chip background
         roundRect(cx, x, y, chip.w, CHIP_H, 10);
         cx.fillStyle = chip.pts === 5 ? "rgba(200,255,30,0.12)"
                      : chip.pts === 3 ? "rgba(244,244,240,0.06)"
@@ -450,20 +488,17 @@ function RevealedPicks({ group, members, matches }) {
         const cy2 = y + CHIP_H / 2;
         let tx = x + CHIP_PAD_X;
 
-        // Name
         cx.fillStyle = C.chalk60;
         cx.font = "600 28px 'Barlow', sans-serif";
         cx.textAlign = "left";
         cx.fillText(chip.name, tx, cy2);
         tx += chip.nameW + 16;
 
-        // Score prediction
         cx.fillStyle = chip.pts === 5 ? C.volt : C.chalk;
         cx.font = "700 30px 'Saira', sans-serif";
         cx.fillText(chip.pred, tx, cy2);
         tx += chip.predW;
 
-        // Points badge
         if (chip.pts !== null) {
           tx += 10;
           cx.fillStyle = chip.pts === 5 ? C.volt : chip.pts === 3 ? C.chalk : C.chalk25;
@@ -474,6 +509,25 @@ function RevealedPicks({ group, members, matches }) {
         x += chip.w + CHIP_GAP;
       });
     });
+
+    // ── Roast block ──────────────────────────────────────────────
+    if (roastText && roastLines.length > 0) {
+      const roastY = chipsBottom + ROAST_PAD_TOP;
+
+      // Thin divider above roast
+      cx.strokeStyle = "rgba(255,255,255,0.07)";
+      cx.lineWidth = 1.5;
+      cx.beginPath();
+      cx.moveTo(PAD, roastY - 14); cx.lineTo(W - PAD, roastY - 14);
+      cx.stroke();
+
+      cx.font = ROAST_FONT;
+      cx.fillStyle = C.chalk60;
+      cx.textAlign = "left";
+      roastLines.forEach((line, li) => {
+        cx.fillText(line, PAD + ROAST_PAD_X, roastY + li * ROAST_LINE_H + ROAST_LINE_H / 2);
+      });
+    }
 
     // ── Footer ───────────────────────────────────────────────────
     cx.textAlign = "center";
@@ -494,7 +548,6 @@ function RevealedPicks({ group, members, matches }) {
         });
         setSharedMatchId({ id: m.id, mode: "shared" });
       } else {
-        // Fallback: download the PNG
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
         a.download = "football67-league.png";
@@ -505,7 +558,6 @@ function RevealedPicks({ group, members, matches }) {
       setTimeout(() => setSharedMatchId(null), 1800);
     } catch (e) {
       if (e.name !== "AbortError") console.error("Share failed:", e);
-      // AbortError = user cancelled — silently ignore
     }
   }
 
