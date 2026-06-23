@@ -211,10 +211,11 @@ export async function generateGlobalRoast(db, ctx, matchId, matchName, finalScor
 
     await roastRef.set({
       roastText,
-      targetName:  name,
-      targetUid:   leader.id,
+      targetName:    name,
+      targetUid:     leader.id,
       matchName,
       finalScore,
+      predictedScore: `${leaderPred.home}-${leaderPred.away}`,
       generatedAt: existing.exists ? existing.data().generatedAt : new Date().toISOString(),
     });
 

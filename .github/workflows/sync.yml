@@ -1,0 +1,65 @@
+name: Sync WC2026 Matches
+
+on:
+  schedule:
+    - cron: "*/30 11-23 * * *"   # 11:00–23:30 UTC (covers all NA kickoff windows)
+    - cron: "*/30 0-3 * * *"     # 00:00–03:30 UTC
+
+  workflow_dispatch:
+    inputs:
+      competition:
+        description: "Competition code (default: WC)"
+        required: false
+        default: "WC"
+
+env:
+  NODE_VERSION: "20"
+  COMPETITION: ${{ github.event.inputs.competition || 'WC' }}
+
+jobs:
+  sync:
+    name: Sync fixtures & λ values
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # Prevents two scheduled runs overlapping. If a run is already in
+    # progress when the next cron fires, the new one is queued (not
+    # cancelled) so no sync window is ever silently dropped.
+    concurrency:
+      group: sync-wc2026
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Write Firebase service account
+        run: echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > serviceAccount.json
+
+      - name: Run sync
+        env:
+          FOOTBALL_DATA_TOKEN: ${{ secrets.FOOTBALL_DATA_TOKEN }}
+          COMPETITION: ${{ env.COMPETITION }}
+          DAYS_AHEAD: "45"
+        run: node scripts/syncMatches.js
+
+      - name: Clean up service account
+        if: always()
+        run: rm -f serviceAccount.json
+
+      - name: Record sync heartbeat
+        if: success()
+        env:
+          COMPETITION: ${{ env.COMPETITION }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: node scripts/recordSync.js
