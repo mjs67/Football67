@@ -2,8 +2,8 @@ name: Sync WC2026 Matches
 
 on:
   schedule:
-    - cron: "*/30 11-23 * * *"   # 11:00–23:30 UTC (covers all NA kickoff windows)
-    - cron: "*/30 0-3 * * *"     # 00:00–03:30 UTC
+    - cron: "*/30 11-23 * * *"
+    - cron: "*/30 0-3 * * *"
 
   workflow_dispatch:
     inputs:
@@ -39,8 +39,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Write credential to an absolute path and export it so both
+      # syncMatches.js and recordSync.js resolve it unambiguously.
       - name: Write Firebase service account
-        run: echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > serviceAccount.json
+        run: |
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > ${{ github.workspace }}/serviceAccount.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=${{ github.workspace }}/serviceAccount.json" >> $GITHUB_ENV
 
       - name: Run sync
         env:
@@ -57,8 +61,6 @@ jobs:
           GITHUB_RUN_ID: ${{ github.run_id }}
         run: node scripts/recordSync.js
 
-      # Cleanup runs last so both syncMatches.js and recordSync.js
-      # have access to serviceAccount.json. still runs on failure.
       - name: Clean up service account
         if: always()
-        run: rm -f serviceAccount.json
+        run: rm -f ${{ github.workspace }}/serviceAccount.json

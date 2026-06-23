@@ -7,7 +7,14 @@
 import { readFileSync, existsSync } from "node:fs";
 import admin from "firebase-admin";
 
-if (existsSync("./serviceAccount.json")) {
+// Explicit credential path takes priority (set by the GitHub Action via
+// GOOGLE_APPLICATION_CREDENTIALS). Falls back to ./serviceAccount.json
+// for local manual runs, then to ADC as a last resort.
+const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+if (credPath && existsSync(credPath)) {
+  const sa = JSON.parse(readFileSync(credPath, "utf8"));
+  admin.initializeApp({ credential: admin.credential.cert(sa) });
+} else if (existsSync("./serviceAccount.json")) {
   const sa = JSON.parse(readFileSync("./serviceAccount.json", "utf8"));
   admin.initializeApp({ credential: admin.credential.cert(sa) });
 } else {
@@ -18,11 +25,11 @@ const db = admin.firestore();
 const now = new Date();
 
 await db.doc("settings/syncStatus").set({
-  lastSyncAt: admin.firestore.Timestamp.fromDate(now),
+  lastSyncAt:  admin.firestore.Timestamp.fromDate(now),
   lastSyncIso: now.toISOString(),
   competition: process.env.COMPETITION || "WC",
   triggeredBy: process.env.GITHUB_EVENT_NAME || "manual",
-  runId: process.env.GITHUB_RUN_ID || null,
+  runId:       process.env.GITHUB_RUN_ID || null,
 }, { merge: true });
 
 console.log(`Heartbeat written: ${now.toISOString()}`);
