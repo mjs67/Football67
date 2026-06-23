@@ -301,33 +301,211 @@ function RevealedPicks({ group, members, matches }) {
   const named = members.filter((r) => memberIds.has(r.id));
 
   async function shareMatch(m, byUid) {
-    const scoreStr = m.status === "finished"
-      ? `FT ${m.homeScore}–${m.awayScore}`
-      : "● Live";
+    // ── Canvas constants (matches shareCard.js palette) ──────────
+    const W = 1080;
+    const C = {
+      night:   "#0a0a0c",
+      pitch:   "#16161c",
+      deep:    "#0e0e12",
+      chalk:   "#f4f4f0",
+      chalk60: "rgba(244,244,240,0.6)",
+      chalk25: "rgba(244,244,240,0.25)",
+      chalk12: "rgba(244,244,240,0.12)",
+      volt:    "#c8ff1e",
+      voltInk: "#161d02",
+      red:     "#ff6b5c",
+      blue:    "#4d7fff",
+    };
 
-    const chipLines = named.map((r) => {
+    function roundRect(cx, x, y, w, h, r) {
+      cx.beginPath();
+      cx.moveTo(x + r, y);
+      cx.arcTo(x + w, y,     x + w, y + h, r);
+      cx.arcTo(x + w, y + h, x,     y + h, r);
+      cx.arcTo(x,     y + h, x,     y,     r);
+      cx.arcTo(x,     y,     x + w, y,     r);
+      cx.closePath();
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = W;
+    // Height will be set after measuring chips — use a temp canvas for measurement
+    const measureCtx = document.createElement("canvas").getContext("2d");
+
+    // ── Pre-measure chip widths to compute canvas height ────────
+    const CHIP_H = 76;
+    const CHIP_PAD_X = 28;
+    const CHIP_GAP = 16;
+    const CHIP_TOP = 280;
+    const PAD = 72;
+
+    const chips = named.map((r) => {
       const p = byUid?.get(r.id);
       const pts = p ? revealPoints(p, m) : null;
-      const name = (r.nickname || r.displayName || "Anon").split(" ")[0];
-      const pred = p ? `${p.home}–${p.away}` : "—";
-      const ptStr = pts !== null ? ` +${pts}` : "";
-      return `${name} ${pred}${ptStr}`;
-    }).join("  |  ");
+      return {
+        name: (r.nickname || r.displayName || "Anon").split(" ")[0],
+        pred: p ? `${p.home}–${p.away}` : "—",
+        pts,
+      };
+    });
 
-    const text = `⚽ ${group.name} — ${m.home} v ${m.away} ${scoreStr}\n${chipLines}\n\nPlay at ${window.location.origin}`;
+    measureCtx.font = "600 28px 'Barlow', sans-serif";
+    const chipData = chips.map((c) => {
+      measureCtx.font = "600 28px 'Barlow', sans-serif";
+      const nameW = measureCtx.measureText(c.name).width;
+      measureCtx.font = "700 30px 'Saira', sans-serif";
+      const predW = measureCtx.measureText(c.pred).width;
+      measureCtx.font = "700 24px 'Saira', sans-serif";
+      const ptsW = c.pts !== null ? measureCtx.measureText(`+${c.pts}`).width + 14 : 0;
+      const total = CHIP_PAD_X * 2 + nameW + 16 + predW + (ptsW ? 10 + ptsW : 0);
+      return { ...c, w: total, nameW, predW, ptsW };
+    });
+
+    const maxRowW = W - PAD * 2;
+    const chipRows = [[]];
+    let rowW = 0;
+    for (const chip of chipData) {
+      if (chipRows[chipRows.length - 1].length > 0 && rowW + CHIP_GAP + chip.w > maxRowW) {
+        chipRows.push([]);
+        rowW = 0;
+      }
+      chipRows[chipRows.length - 1].push(chip);
+      rowW += (chipRows[chipRows.length - 1].length > 1 ? CHIP_GAP : 0) + chip.w;
+    }
+
+    const FOOTER_H = 88;
+    const H = Math.max(
+      CHIP_TOP + chipRows.length * (CHIP_H + CHIP_GAP) - CHIP_GAP + FOOTER_H,
+      480
+    );
+    canvas.height = H;
+    const cx = canvas.getContext("2d");
+
+    // Background
+    cx.fillStyle = C.night;
+    cx.fillRect(0, 0, W, H);
+
+    // Subtle volt top-glow (matches site body background)
+    const glow = cx.createRadialGradient(W / 2, -40, 0, W / 2, -40, W * 0.7);
+    glow.addColorStop(0, "rgba(200,255,30,0.07)");
+    glow.addColorStop(1, "transparent");
+    cx.fillStyle = glow;
+    cx.fillRect(0, 0, W, H);
+
+    // ── League + match header ────────────────────────────────────
+    cx.textBaseline = "middle";
+
+    // League name
+    cx.fillStyle = C.chalk60;
+    cx.font = "600 30px 'Barlow', sans-serif";
+    cx.textAlign = "left";
+    cx.fillText(group.name.toUpperCase(), PAD, 72);
+
+    // Match title  HOME v AWAY
+    cx.fillStyle = C.chalk;
+    cx.font = "700 72px 'Saira Condensed', 'Arial Narrow', sans-serif";
+    const matchLabel = `${m.home.toUpperCase()}  v  ${m.away.toUpperCase()}`;
+    cx.fillText(matchLabel, PAD, 148);
+
+    // Score chip
+    const scoreStr = m.status === "finished"
+      ? `FT ${m.homeScore}–${m.awayScore}`
+      : "● LIVE";
+    cx.font = "700 32px 'Saira', sans-serif";
+    const scoreW = cx.measureText(scoreStr).width + 32;
+    const scoreX = PAD;
+    const scoreY = 185;
+    roundRect(cx, scoreX, scoreY, scoreW, 48, 8);
+    cx.fillStyle = m.status === "finished" ? C.volt : C.red;
+    cx.fill();
+    cx.fillStyle = m.status === "finished" ? C.voltInk : C.chalk;
+    cx.textAlign = "left";
+    cx.fillText(scoreStr, scoreX + 16, scoreY + 24);
+
+    // ── Divider ──────────────────────────────────────────────────
+    cx.strokeStyle = C.chalk12;
+    cx.lineWidth = 2;
+    cx.beginPath();
+    cx.moveTo(PAD, 256); cx.lineTo(W - PAD, 256);
+    cx.stroke();
+
+    // ── Pick chips ───────────────────────────────────────────────
+    chipRows.forEach((row, ri) => {
+      let x = PAD;
+      const y = CHIP_TOP + ri * (CHIP_H + CHIP_GAP);
+      row.forEach((chip) => {
+        // chip background
+        roundRect(cx, x, y, chip.w, CHIP_H, 10);
+        cx.fillStyle = chip.pts === 5 ? "rgba(200,255,30,0.12)"
+                     : chip.pts === 3 ? "rgba(244,244,240,0.06)"
+                     : C.deep;
+        cx.fill();
+        cx.strokeStyle = chip.pts === 5 ? C.volt
+                       : chip.pts === 3 ? C.chalk25
+                       : C.chalk12;
+        cx.lineWidth = chip.pts === 5 ? 2.5 : 1.5;
+        roundRect(cx, x, y, chip.w, CHIP_H, 10);
+        cx.stroke();
+
+        const cy2 = y + CHIP_H / 2;
+        let tx = x + CHIP_PAD_X;
+
+        // Name
+        cx.fillStyle = C.chalk60;
+        cx.font = "600 28px 'Barlow', sans-serif";
+        cx.textAlign = "left";
+        cx.fillText(chip.name, tx, cy2);
+        tx += chip.nameW + 16;
+
+        // Score prediction
+        cx.fillStyle = chip.pts === 5 ? C.volt : C.chalk;
+        cx.font = "700 30px 'Saira', sans-serif";
+        cx.fillText(chip.pred, tx, cy2);
+        tx += chip.predW;
+
+        // Points badge
+        if (chip.pts !== null) {
+          tx += 10;
+          cx.fillStyle = chip.pts === 5 ? C.volt : chip.pts === 3 ? C.chalk : C.chalk25;
+          cx.font = "700 24px 'Saira', sans-serif";
+          cx.fillText(`+${chip.pts}`, tx, cy2);
+        }
+
+        x += chip.w + CHIP_GAP;
+      });
+    });
+
+    // ── Footer ───────────────────────────────────────────────────
+    cx.textAlign = "center";
+    cx.fillStyle = C.volt;
+    cx.font = "700 36px 'Saira Condensed', 'Arial Narrow', sans-serif";
+    cx.fillText("WWW.FOOTBALL67.COM", W / 2, H - 48);
+
+    // ── Share / download ─────────────────────────────────────────
+    const blob = await new Promise((res) => canvas.toBlob(res, "image/png"));
+    const file = new File([blob], "football67-league.png", { type: "image/png" });
 
     try {
-      if (navigator.share) {
-        await navigator.share({ title: `${m.home} v ${m.away} Picks`, text });
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: `${m.home} v ${m.away} — ${group.name}`,
+          text: `Check out our league picks on Football67!`,
+        });
         setSharedMatchId({ id: m.id, mode: "shared" });
-        setTimeout(() => setSharedMatchId(null), 1800);
       } else {
-        await navigator.clipboard.writeText(text);
-        setSharedMatchId({ id: m.id, mode: "copied" });
-        setTimeout(() => setSharedMatchId(null), 1800);
+        // Fallback: download the PNG
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "football67-league.png";
+        a.click();
+        URL.revokeObjectURL(a.href);
+        setSharedMatchId({ id: m.id, mode: "shared" });
       }
-    } catch {
-      // user cancelled share sheet or clipboard unavailable — silently ignore
+      setTimeout(() => setSharedMatchId(null), 1800);
+    } catch (e) {
+      if (e.name !== "AbortError") console.error("Share failed:", e);
+      // AbortError = user cancelled — silently ignore
     }
   }
 
@@ -350,9 +528,7 @@ function RevealedPicks({ group, members, matches }) {
                 onClick={() => shareMatch(m, byUid)}
                 title="Share this match's picks"
               >
-                {sharedMatchId?.id === m.id
-                  ? sharedMatchId.mode === "copied" ? "Copied ✓" : "Shared ✓"
-                  : "Share"}
+                {sharedMatchId?.id === m.id ? "Shared ✓" : "Share"}
               </button>
             </p>
             <div className="reveal-chips">
