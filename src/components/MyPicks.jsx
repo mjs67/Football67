@@ -7,6 +7,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { sharePickCard } from "../shareCard.js";
+import { matchProbs } from "../poisson.js";
 
 function pointsFor(pred, match) {
   if (!pred || !match || match.status !== "finished") return null;
@@ -81,24 +82,48 @@ function ShareCardButton({ user, matches, predictions }) {
   );
 }
 
+function aiPrediction(match) {
+  if (!match.odds) return null;
+  const { top } = matchProbs(match.odds.lh, match.odds.la);
+  return { home: top.h, away: top.a };
+}
+
 function FormGraph({ matches, predictions }) {
-  const rows = matches
+  const settled = matches
     .filter((m) => m.status === "finished" && predictions[m.id])
-    .sort((a, b) => (a.kickoff?.toMillis?.() || 0) - (b.kickoff?.toMillis?.() || 0))
-    .map((m) => pointsFor(predictions[m.id], m));
-  if (rows.length < 2) return null;
+    .sort((a, b) => (a.kickoff?.toMillis?.() || 0) - (b.kickoff?.toMillis?.() || 0));
+
+  if (settled.length < 2) return null;
+
+  const userRows = settled.map((m) => pointsFor(predictions[m.id], m));
+  const aiRows = settled.map((m) => pointsFor(aiPrediction(m), m));
 
   const W = 600, H = 120, padX = 6, padY = 10;
-  let cum = 0;
-  const cumulative = rows.map((p) => (cum += p));
-  const max = Math.max(...cumulative, 1);
-  const x = (i) => padX + (i / (rows.length - 1)) * (W - padX * 2);
-  const y = (v) => H - padY - (v / max) * (H - padY * 2);
-  const line = cumulative.map((v, i) => `${x(i)},${y(v)}`).join(" ");
 
-  const exact = rows.filter((p) => p === 5).length;
-  const result = rows.filter((p) => p === 3).length;
-  const acc = Math.round(((exact + result) / rows.length) * 100);
+  let cumU = 0, cumA = 0;
+  const cumUser = userRows.map((p) => (cumU += p));
+  const cumAi = aiRows.map((p) => (cumA += p));
+  const max = Math.max(...cumUser, ...cumAi, 1);
+
+  const x = (i) => padX + (i / (settled.length - 1)) * (W - padX * 2);
+  const y = (v) => H - padY - (v / max) * (H - padY * 2);
+
+  const userLine = cumUser.map((v, i) => `${x(i)},${y(v)}`).join(" ");
+  const aiLine = cumAi.map((v, i) => `${x(i)},${y(v)}`).join(" ");
+
+  const userExact = userRows.filter((p) => p === 5).length;
+  const userResult = userRows.filter((p) => p === 3).length;
+  const userAcc = Math.round(((userExact + userResult) / settled.length) * 100);
+
+  const aiExact = aiRows.filter((p) => p === 5).length;
+  const aiResult = aiRows.filter((p) => p === 3).length;
+  const aiAcc = Math.round(((aiExact + aiResult) / settled.length) * 100);
+
+  const ptsDiff = cumU - cumA;
+  const diffLabel = ptsDiff === 0 ? "tied with AI" : ptsDiff > 0 ? `+${ptsDiff} pts vs AI` : `${ptsDiff} pts vs AI`;
+  const diffStyle = ptsDiff > 0 ? { background: "rgba(200,255,30,0.15)", color: "var(--volt)" }
+    : ptsDiff < 0 ? { background: "rgba(255,107,92,0.15)", color: "var(--red)" }
+    : { background: "rgba(244,244,240,0.08)", color: "var(--chalk-60)" };
 
   return (
     <div className="panel">
@@ -107,22 +132,48 @@ function FormGraph({ matches, predictions }) {
         className="form-graph"
         viewBox={`0 0 ${W} ${H}`}
         role="img"
-        aria-label={`Cumulative points over ${rows.length} settled picks`}
+        aria-label={`Cumulative points over ${settled.length} settled picks — you vs AI model`}
       >
-        <polyline points={line} fill="none" stroke="var(--volt)" strokeWidth="3" strokeLinejoin="round" />
-        {cumulative.map((v, i) => (
-          <circle
-            key={i}
-            cx={x(i)}
-            cy={y(v)}
-            r={rows[i] === 5 ? 5 : rows[i] === 3 ? 4 : 2.5}
-            fill={rows[i] === 5 ? "var(--volt)" : rows[i] === 3 ? "var(--chalk)" : "var(--chalk-25)"}
-          />
+        {/* AI line (behind) */}
+        <polyline points={aiLine} fill="none" stroke="var(--blue)" strokeWidth="2"
+          strokeLinejoin="round" strokeDasharray="5 3" opacity="0.7" />
+        {cumAi.map((v, i) => (
+          <circle key={"ai-" + i} cx={x(i)} cy={y(v)} r={aiRows[i] === 5 ? 4 : aiRows[i] === 3 ? 3 : 2}
+            fill={aiRows[i] === 5 ? "var(--blue)" : aiRows[i] === 3 ? "var(--blue)" : "rgba(77,127,255,0.2)"}
+            opacity={aiRows[i] === 0 ? 0.4 : 0.75} />
+        ))}
+        {/* User line (in front) */}
+        <polyline points={userLine} fill="none" stroke="var(--volt)" strokeWidth="3" strokeLinejoin="round" />
+        {cumUser.map((v, i) => (
+          <circle key={"u-" + i} cx={x(i)} cy={y(v)}
+            r={userRows[i] === 5 ? 5 : userRows[i] === 3 ? 4 : 2.5}
+            fill={userRows[i] === 5 ? "var(--volt)" : userRows[i] === 3 ? "var(--chalk)" : "var(--chalk-25)"} />
         ))}
       </svg>
+
+      <div style={{ display: "flex", gap: "12px", marginBottom: "10px", flexWrap: "wrap" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: "5px", fontSize: "11px", color: "var(--chalk-60)" }}>
+          <svg width="18" height="6" viewBox="0 0 18 6" aria-hidden="true">
+            <line x1="0" y1="3" x2="18" y2="3" stroke="var(--volt)" strokeWidth="2.5" />
+          </svg>
+          You
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: "5px", fontSize: "11px", color: "var(--chalk-60)" }}>
+          <svg width="18" height="6" viewBox="0 0 18 6" aria-hidden="true">
+            <line x1="0" y1="3" x2="18" y2="3" stroke="var(--blue)" strokeWidth="2" strokeDasharray="4 2" opacity="0.8" />
+          </svg>
+          AI model
+        </span>
+      </div>
+
+      <p className="panel-note" style={{ marginBottom: "4px" }}>
+        <strong style={{ color: "var(--chalk)" }}>You</strong>{" "}
+        {userAcc}% scored ({userExact} exact, {userResult} right results across {settled.length} matches)
+        {" "}<span style={{ ...diffStyle, fontSize: "10px", fontWeight: 600, padding: "1px 6px", borderRadius: "3px", letterSpacing: "0.04em", textTransform: "uppercase", display: "inline-block", verticalAlign: "middle" }}>{diffLabel}</span>
+      </p>
       <p className="panel-note">
-        {acc}% of your settled picks scored ({exact} exact, {result} right results across{" "}
-        {rows.length} matches). Volt dots = exact scores.
+        <strong style={{ color: "var(--blue)" }}>AI</strong>{" "}
+        {aiAcc}% scored ({aiExact} exact, {aiResult} right results across {settled.length} matches)
       </p>
     </div>
   );
