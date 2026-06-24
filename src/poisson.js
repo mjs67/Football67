@@ -29,6 +29,18 @@ export function matchProbs(lh, la) {
   return { ph, pd, pa, top };
 }
 
+// Method B: pick whichever of ph/pd/pa is highest as the predicted result.
+// More accurate than reading the result off the single most-likely scoreline
+// (top), because home-win probability is spread across many scorelines
+// (1-0, 2-0, 2-1, …) while the top scoreline often under-represents it.
+// Returns "H" | "D" | "A".
+export function predict1x2(lh, la) {
+  const { ph, pd, pa } = matchProbs(lh, la);
+  if (ph >= pd && ph >= pa) return "H";
+  if (pd >= ph && pd >= pa) return "D";
+  return "A";
+}
+
 export function pct(p) {
   const n = p * 100;
   if (n > 0 && n < 1) return "<1";
