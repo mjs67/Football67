@@ -3,34 +3,59 @@
 # Repo secrets required (Settings → Secrets and variables → Actions):
 #   FIREBASE_SERVICE_ACCOUNT   the full JSON of your service account key
 #   FOOTBALL_DATA_TOKEN        free key from football-data.org
-#
-# Repo variable (optional):
-#   COMPETITION                e.g. WC, PL, CL, EC, PD, BL1, SA  (default PL)
 
 name: automation
 
-# Run JS actions on Node 24 (silences the Node 20 deprecation warning)
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 on:
   schedule:
-    - cron: "*/30 * * * *" # sync fixtures, results, odds + leaderboard every 30 min
-  workflow_dispatch: {}     # run manually from the Actions tab
+    - cron: "*/30 11-23 * * *"   # 11:00–23:30 UTC (covers all NA kickoff windows)
+    - cron: "*/30 0-3 * * *"     # 00:00–03:30 UTC
+  workflow_dispatch: {}
 
 jobs:
   sync:
+    name: Sync fixtures & λ values
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    concurrency:
+      group: sync-wc2026
+      cancel-in-progress: false
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
-      - run: npm ci || npm install
-      - name: Write service account
-        run: echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > serviceAccount.json
+          node-version: "20"
+          cache: "npm"
+
+      - run: npm ci
+
+      # Write credential to absolute path and export it for all subsequent steps
+      - name: Write Firebase service account
+        run: |
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > ${{ github.workspace }}/serviceAccount.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=${{ github.workspace }}/serviceAccount.json" >> $GITHUB_ENV
+
       - name: Sync fixtures & results, recompute leaderboard
         env:
           FOOTBALL_DATA_TOKEN: ${{ secrets.FOOTBALL_DATA_TOKEN }}
-          COMPETITION: ${{ vars.COMPETITION }}
+          COMPETITION: "WC"
+          DAYS_AHEAD: "45"
         run: node scripts/syncMatches.js
+
+      - name: Record sync heartbeat
+        if: success()
+        env:
+          COMPETITION: "WC"
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: node scripts/recordSync.js
+
+      - name: Clean up service account
+        if: always()
+        run: rm -f ${{ github.workspace }}/serviceAccount.json
