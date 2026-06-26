@@ -14,9 +14,30 @@
 // predictionsCount: every SETTLED prediction (the match has finished),
 // whether or not it scored — the denominator for the leaderboard's
 // points-per-prediction column.
+//
+// Bracket picks schema (new rolling-deadline format):
+//   brackets/{uid}.rounds = {
+//     0: { picks: { "r0-0": "Argentina", ... }, lockedAt: Timestamp },
+//     1: { picks: { "r1-0": "Argentina", ... }, lockedAt: Timestamp },
+//     ...
+//   }
+//   Legacy format (flat picks) is also supported for migration.
 function phaseOf(m) {
   if (m.phase === "group" || m.phase === "knockout") return m.phase;
   return m.competition && m.competition.includes("Group") ? "group" : "knockout";
+}
+
+// Merge bracket document picks into a single flat map regardless of schema version.
+function mergeBracketPicks(docData) {
+  if (docData.rounds) {
+    const merged = {};
+    for (const rData of Object.values(docData.rounds)) {
+      Object.assign(merged, rData.picks || {});
+    }
+    return merged;
+  }
+  // Legacy flat format
+  return docData.picks || {};
 }
 
 export async function recomputeLeaderboard(db) {
@@ -69,13 +90,14 @@ export async function recomputeLeaderboard(db) {
   const bracketDoc = await db.doc("settings/bracket").get();
   if (bracketDoc.exists) {
     const b = bracketDoc.data();
-    const results = b.results || {};
-    if (Object.keys(results).length > 0) {
+    const bracketResults = b.results || {};
+    if (Object.keys(bracketResults).length > 0) {
       const allBrackets = await db.collection("brackets").get();
       for (const doc of allBrackets.docs) {
-        const picks = doc.data().picks || {};
+        // Support both new rounds-based schema and legacy flat picks
+        const picks = mergeBracketPicks(doc.data());
         let bracketPoints = 0;
-        for (const [matchId, winner] of Object.entries(results)) {
+        for (const [matchId, winner] of Object.entries(bracketResults)) {
           const round = Number(matchId.match(/^r(\d+)-/)?.[1] ?? -1);
           if (round >= 0 && picks[matchId] === winner) {
             bracketPoints += b.points?.[round] ?? 0;
