@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import {
   doc,
-  getDoc,
   onSnapshot,
   serverTimestamp,
   setDoc,
@@ -317,31 +316,52 @@ function Toggle({ eyebrow, note, on, onToggle }) {
   );
 }
 
-function useGlobalRoast(matchId, matchStatus, userId, pts) {
-  const [roast, setRoast] = useState(null);
-  useEffect(() => {
-    if (matchStatus !== "finished" || !matchId || !userId || !pts) return;
-    let cancelled = false;
-    async function load() {
-      try {
-        const snap = await getDoc(doc(db, "globalRoasts", matchId));
-        if (!cancelled && snap.exists()) {
-          const d = snap.data();
-          if (d.targetUid === userId) setRoast(d.roastText);
-        }
-      } catch {
-        /* non-fatal */
-      }
-    }
-    load();
-    return () => { cancelled = true; };
-  }, [matchId, matchStatus, userId, pts]);
-  return roast;
+const ROAST_TEMPLATES = [
+  "{name} got {match} right and is now the most annoying person alive. +{pts} points and zero self-awareness to show for it.",
+  "Nobody in this league has done less to deserve {pts} points than {name}. {match} handed it to them and they still think it was skill.",
+  "{name} called {match} and is acting like they coached the winning side. You filled in a form. Calm down.",
+  "The {match} result is in, {score}, and {name} collects +{pts}. A fraud has been rewarded. The system is broken.",
+  "{name} predicted {match} correctly. So do people who do not watch football. This means nothing. You mean nothing.",
+  "{name} called {match} right for the same reason a broken clock is right twice a day. Stupid luck. Not intelligence.",
+  "Do not mistake {name} getting {pts} from {match} for understanding football. They do not. They never will.",
+  "{name} saw {score} coming on {match}? No they did not. They guessed and hit and now we all have to pretend it meant something.",
+  "The most insulting part of {match} is not the result. It is that {name} predicted it and genuinely believes they are good at this.",
+  "{name} got {match} right and has been absolutely radioactive to be around ever since. +{pts} points, zero chill.",
+  "There is not a single person in this league who wanted {name} to get {match} right. The universe ignored us. Again.",
+  "{match} ends, {score}, {name} gets {pts} points, and the rest of us quietly consider our life choices that led to being in a league with them.",
+  "{name} got {match} right. My dog would have gotten {match} right. The dog is not insufferable about it.",
+  "A child. A random stranger. {name}. All equally capable of predicting {match}. Only one of them is making it a whole thing.",
+  "Getting {match} right is not an achievement. {name} making it one is the achievement — of delusion.",
+  "{pts} points from {match} for {name}. The prediction required no skill, no knowledge, and no brain. A perfect fit.",
+  "{name} has used {match} as an opportunity to remind the league they exist. We were coping fine without the reminder.",
+  "The confidence {name} has developed from {pts} points on {match} is medically concerning. Someone should intervene.",
+  "{match} ends {score} and {name} — of all people — gets it right. This league has truly lost the plot.",
+  "Out of everyone in this league, {name} is the last person who should be collecting {pts} from {match}. And yet.",
+  "The {match} result handed {pts} points to {name} and I refuse to accept it. I am refusing. It means nothing.",
+  "{score} on {match}. {pts} points to {name}. Whatever god runs this league hates the rest of us specifically.",
+  "{name} predicted {match} correctly. I have stared at this for a while now. It still does not make sense.",
+  "{name} is riding {match} and {pts} points like it will last. It will not. And we will all be there when it does not.",
+  "This league collectively lost something today when {name} got {match} right. We will need time to process the {pts} points of injustice.",
+  "Everyone watching {match} hoping {name} would get it wrong: we failed. +{pts} to the one person who deserved it least.",
+  "The silence in this league after {name} scored {pts} from {match} was grief. Pure, unprocessed grief.",
+  "{match} is over, {score}, and {name} walks away with {pts} points that belong to literally anyone else in this league.",
+  "{name} got {match} right. We will never forget. Not the prediction. The insufferability that followed.",
+  "Statistically, {name} was due for a correct prediction. The universe just had to run through every wrong person in the league first.",
+];
+
+function generatePickRoast(matchId, name, pts, match, score) {
+  const seed = matchId.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
+  const index = (seed + name.length) % ROAST_TEMPLATES.length;
+  return ROAST_TEMPLATES[index]
+    .replace(/{name}/g,  name)
+    .replace(/{pts}/g,   pts)
+    .replace(/{match}/g, match)
+    .replace(/{score}/g, score);
 }
 
-function PickRoast({ matchId, matchStatus, userId, pts }) {
-  const roast = useGlobalRoast(matchId, matchStatus, userId, pts);
-  if (!roast) return null;
+function PickRoast({ matchId, matchStatus, userName, pts, matchName, score }) {
+  if (matchStatus !== "finished" || !pts || !userName) return null;
+  const roast = generatePickRoast(matchId, userName, pts, matchName, score);
   return (
     <div className="pick-roast">
       <span className="pick-roast-flame">🔥</span>
@@ -351,6 +371,15 @@ function PickRoast({ matchId, matchStatus, userId, pts }) {
 }
 
 function History({ matches, predictions, user }) {
+  const [nickname, setNickname] = useState("");
+  useEffect(
+    () =>
+      onSnapshot(doc(db, "users", user.uid), (s) =>
+        setNickname(s.exists() ? s.data().nickname || s.data().displayName || "" : "")
+      ),
+    [user.uid]
+  );
+
   const rows = matches
     .filter((m) => predictions[m.id])
     .slice()
@@ -359,6 +388,8 @@ function History({ matches, predictions, user }) {
   if (rows.length === 0)
     return <p className="empty">No picks yet — head to Fixtures and call some scores.</p>;
 
+  const displayName = nickname || user.displayName || "You";
+
   return (
     <>
       <h2 className="section-label">All picks</h2>
@@ -366,6 +397,7 @@ function History({ matches, predictions, user }) {
         {rows.map((m) => {
           const p = predictions[m.id];
           const pts = pointsFor(p, m);
+          const score = m.status === "finished" ? `${m.homeScore}-${m.awayScore}` : null;
           return (
             <li key={m.id} className="pick-row">
               <span className="pick-teams">
@@ -389,8 +421,10 @@ function History({ matches, predictions, user }) {
                 <PickRoast
                   matchId={m.id}
                   matchStatus={m.status}
-                  userId={user?.uid}
+                  userName={displayName}
                   pts={pts}
+                  matchName={`${m.home} v ${m.away}`}
+                  score={score}
                 />
               )}
             </li>
