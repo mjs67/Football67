@@ -657,17 +657,6 @@ code {
 .pick-pts.gold { color: var(--volt); }
 .pick-pts.ok { color: var(--chalk); }
 .pick-pts.zero { color: var(--chalk-25); }
-.pick-roast {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin-top: 6px;
-  padding-top: 8px;
-  border-top: 1px solid rgba(255,255,255,0.07);
-}
-.pick-roast-flame { font-size: 13px; flex-shrink: 0; line-height: 1.6; }
-.pick-roast-text { margin: 0; font-size: 12px; line-height: 1.6; color: var(--chalk-60); }
 
 /* Leagues */
 .group-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
@@ -754,6 +743,9 @@ code {
 
 /* ── Form graph ────────────────────────────────────────────── */
 .form-graph { width: 100%; height: auto; display: block; margin-bottom: 8px; }
+.form-legend { display: flex; gap: 16px; margin-bottom: 6px; font-size: 13px; color: var(--chalk-60); }
+.form-legend-item { display: flex; align-items: center; gap: 6px; }
+.form-vs-ai { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 4px; font-family: var(--numeral); font-weight: 700; font-size: 11px; letter-spacing: 0.06em; vertical-align: middle; }
 
 /* ── Auto-pick tag in history ──────────────────────────────── */
 .auto-tag {

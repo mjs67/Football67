@@ -7,6 +7,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { sharePickCard } from "../shareCard.js";
+import { matchProbs } from "../poisson.js";
 
 function pointsFor(pred, match) {
   if (!pred || !match || match.status !== "finished") return null;
@@ -36,7 +37,7 @@ export default function MyPicks({ user, matches, predictions, onRequireSignIn })
       <FormGraph matches={matches} predictions={predictions} />
       <TiebreakerCard user={user} />
       <SettingsToggles user={user} />
-      <History matches={matches} predictions={predictions} user={user} />
+      <History matches={matches} predictions={predictions} />
     </>
   );
 }
@@ -81,24 +82,50 @@ function ShareCardButton({ user, matches, predictions }) {
   );
 }
 
+function aiPickFor(match) {
+  if (!match.odds) return null;
+  const { top } = matchProbs(match.odds.lh, match.odds.la);
+  return { home: top.h, away: top.a };
+}
+
 function FormGraph({ matches, predictions }) {
-  const rows = matches
+  const settled = matches
     .filter((m) => m.status === "finished" && predictions[m.id])
-    .sort((a, b) => (a.kickoff?.toMillis?.() || 0) - (b.kickoff?.toMillis?.() || 0))
-    .map((m) => pointsFor(predictions[m.id], m));
-  if (rows.length < 2) return null;
+    .sort((a, b) => (a.kickoff?.toMillis?.() || 0) - (b.kickoff?.toMillis?.() || 0));
 
-  const W = 600, H = 120, padX = 6, padY = 10;
-  let cum = 0;
-  const cumulative = rows.map((p) => (cum += p));
-  const max = Math.max(...cumulative, 1);
-  const x = (i) => padX + (i / (rows.length - 1)) * (W - padX * 2);
+  if (settled.length < 2) return null;
+
+  const userRows = settled.map((m) => pointsFor(predictions[m.id], m));
+  const aiRows = settled.map((m) => {
+    const ai = aiPickFor(m);
+    return ai ? pointsFor(ai, m) : 0;
+  });
+  const hasAi = aiRows.some((p) => p !== null && p !== undefined);
+
+  const W = 600, H = 140, padX = 6, padY = 14;
+
+  let cumU = 0, cumA = 0;
+  const cumUser = userRows.map((p) => (cumU += p ?? 0));
+  const cumAi   = aiRows.map((p)   => (cumA += p ?? 0));
+
+  const allVals = [...cumUser, ...(hasAi ? cumAi : [])];
+  const max = Math.max(...allVals, 1);
+
+  const x = (i) => padX + (i / (settled.length - 1)) * (W - padX * 2);
   const y = (v) => H - padY - (v / max) * (H - padY * 2);
-  const line = cumulative.map((v, i) => `${x(i)},${y(v)}`).join(" ");
 
-  const exact = rows.filter((p) => p === 5).length;
-  const result = rows.filter((p) => p === 3).length;
-  const acc = Math.round(((exact + result) / rows.length) * 100);
+  const userLine = cumUser.map((v, i) => `${x(i)},${y(v)}`).join(" ");
+  const aiLine   = cumAi.map((v, i)   => `${x(i)},${y(v)}`).join(" ");
+
+  const userExact  = userRows.filter((p) => p === 5).length;
+  const userResult = userRows.filter((p) => p === 3).length;
+  const userAcc    = Math.round(((userExact + userResult) / settled.length) * 100);
+
+  const aiExact    = aiRows.filter((p) => p === 5).length;
+  const aiResult   = aiRows.filter((p) => p === 3).length;
+  const aiAcc      = hasAi ? Math.round(((aiExact + aiResult) / settled.length) * 100) : null;
+
+  const ptsDiff = cumUser[cumUser.length - 1] - (hasAi ? cumAi[cumAi.length - 1] : 0);
 
   return (
     <div className="panel">
@@ -107,22 +134,83 @@ function FormGraph({ matches, predictions }) {
         className="form-graph"
         viewBox={`0 0 ${W} ${H}`}
         role="img"
-        aria-label={`Cumulative points over ${rows.length} settled picks`}
+        aria-label={`Cumulative points over ${settled.length} settled picks`}
       >
-        <polyline points={line} fill="none" stroke="var(--volt)" strokeWidth="3" strokeLinejoin="round" />
-        {cumulative.map((v, i) => (
+        {/* AI model line (dashed, blue) */}
+        {hasAi && (
+          <>
+            <polyline
+              points={aiLine}
+              fill="none"
+              stroke="var(--blue)"
+              strokeWidth="2.5"
+              strokeDasharray="6 4"
+              strokeLinejoin="round"
+              opacity="0.8"
+            />
+            {cumAi.map((v, i) => (
+              <circle
+                key={"ai" + i}
+                cx={x(i)}
+                cy={y(v)}
+                r={aiRows[i] === 5 ? 5 : aiRows[i] === 3 ? 4 : 2.5}
+                fill="var(--blue)"
+                opacity="0.75"
+              />
+            ))}
+          </>
+        )}
+        {/* User line (solid, volt) */}
+        <polyline points={userLine} fill="none" stroke="var(--volt)" strokeWidth="3" strokeLinejoin="round" />
+        {cumUser.map((v, i) => (
           <circle
-            key={i}
+            key={"u" + i}
             cx={x(i)}
             cy={y(v)}
-            r={rows[i] === 5 ? 5 : rows[i] === 3 ? 4 : 2.5}
-            fill={rows[i] === 5 ? "var(--volt)" : rows[i] === 3 ? "var(--chalk)" : "var(--chalk-25)"}
+            r={userRows[i] === 5 ? 5 : userRows[i] === 3 ? 4 : 2.5}
+            fill={userRows[i] === 5 ? "var(--volt)" : userRows[i] === 3 ? "var(--chalk)" : "var(--chalk-25)"}
           />
         ))}
       </svg>
-      <p className="panel-note">
-        {acc}% of your settled picks scored ({exact} exact, {result} right results across{" "}
-        {rows.length} matches). Volt dots = exact scores.
+
+      {/* Legend */}
+      {hasAi && (
+        <div className="form-legend">
+          <span className="form-legend-item">
+            <svg width="24" height="10" viewBox="0 0 24 10" aria-hidden="true">
+              <line x1="0" y1="5" x2="24" y2="5" stroke="var(--volt)" strokeWidth="3" />
+            </svg>
+            You
+          </span>
+          <span className="form-legend-item">
+            <svg width="24" height="10" viewBox="0 0 24 10" aria-hidden="true">
+              <line x1="0" y1="5" x2="24" y2="5" stroke="var(--blue)" strokeWidth="2.5" strokeDasharray="6 4" />
+            </svg>
+            AI model
+          </span>
+        </div>
+      )}
+
+      {/* Summary */}
+      <p className="panel-note" style={{ marginTop: "6px" }}>
+        <b style={{ color: "var(--volt)" }}>You</b>{" "}
+        {userAcc}% scored ({userExact} exact, {userResult} right results across {settled.length} matches)
+        {hasAi && ptsDiff !== 0 && (
+          <span
+            className="form-vs-ai"
+            style={{ background: ptsDiff > 0 ? "rgba(200,255,30,0.15)" : "rgba(255,107,92,0.15)",
+                     color: ptsDiff > 0 ? "var(--volt)" : "var(--red)" }}
+          >
+            {ptsDiff > 0 ? "+" : ""}{ptsDiff} PTS VS AI
+          </span>
+        )}
+        {hasAi && (
+          <>
+            <br />
+            <b style={{ color: "var(--blue)" }}>AI</b>{" "}
+            {aiAcc}% scored ({aiExact} exact, {aiResult} right results across {settled.length} matches)
+          </>
+        )}
       </p>
     </div>
   );
@@ -316,70 +404,7 @@ function Toggle({ eyebrow, note, on, onToggle }) {
   );
 }
 
-const ROAST_TEMPLATES = [
-  "{name} got {match} right and is now the most annoying person alive. +{pts} points and zero self-awareness to show for it.",
-  "Nobody in this league has done less to deserve {pts} points than {name}. {match} handed it to them and they still think it was skill.",
-  "{name} called {match} and is acting like they coached the winning side. You filled in a form. Calm down.",
-  "The {match} result is in, {score}, and {name} collects +{pts}. A fraud has been rewarded. The system is broken.",
-  "{name} predicted {match} correctly. So do people who do not watch football. This means nothing. You mean nothing.",
-  "{name} called {match} right for the same reason a broken clock is right twice a day. Stupid luck. Not intelligence.",
-  "Do not mistake {name} getting {pts} from {match} for understanding football. They do not. They never will.",
-  "{name} saw {score} coming on {match}? No they did not. They guessed and hit and now we all have to pretend it meant something.",
-  "The most insulting part of {match} is not the result. It is that {name} predicted it and genuinely believes they are good at this.",
-  "{name} got {match} right and has been absolutely radioactive to be around ever since. +{pts} points, zero chill.",
-  "There is not a single person in this league who wanted {name} to get {match} right. The universe ignored us. Again.",
-  "{match} ends, {score}, {name} gets {pts} points, and the rest of us quietly consider our life choices that led to being in a league with them.",
-  "{name} got {match} right. My dog would have gotten {match} right. The dog is not insufferable about it.",
-  "A child. A random stranger. {name}. All equally capable of predicting {match}. Only one of them is making it a whole thing.",
-  "Getting {match} right is not an achievement. {name} making it one is the achievement — of delusion.",
-  "{pts} points from {match} for {name}. The prediction required no skill, no knowledge, and no brain. A perfect fit.",
-  "{name} has used {match} as an opportunity to remind the league they exist. We were coping fine without the reminder.",
-  "The confidence {name} has developed from {pts} points on {match} is medically concerning. Someone should intervene.",
-  "{match} ends {score} and {name} — of all people — gets it right. This league has truly lost the plot.",
-  "Out of everyone in this league, {name} is the last person who should be collecting {pts} from {match}. And yet.",
-  "The {match} result handed {pts} points to {name} and I refuse to accept it. I am refusing. It means nothing.",
-  "{score} on {match}. {pts} points to {name}. Whatever god runs this league hates the rest of us specifically.",
-  "{name} predicted {match} correctly. I have stared at this for a while now. It still does not make sense.",
-  "{name} is riding {match} and {pts} points like it will last. It will not. And we will all be there when it does not.",
-  "This league collectively lost something today when {name} got {match} right. We will need time to process the {pts} points of injustice.",
-  "Everyone watching {match} hoping {name} would get it wrong: we failed. +{pts} to the one person who deserved it least.",
-  "The silence in this league after {name} scored {pts} from {match} was grief. Pure, unprocessed grief.",
-  "{match} is over, {score}, and {name} walks away with {pts} points that belong to literally anyone else in this league.",
-  "{name} got {match} right. We will never forget. Not the prediction. The insufferability that followed.",
-  "Statistically, {name} was due for a correct prediction. The universe just had to run through every wrong person in the league first.",
-];
-
-function generatePickRoast(matchId, name, pts, match, score) {
-  const seed = matchId.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
-  const index = (seed + name.length) % ROAST_TEMPLATES.length;
-  return ROAST_TEMPLATES[index]
-    .replace(/{name}/g,  name)
-    .replace(/{pts}/g,   pts)
-    .replace(/{match}/g, match)
-    .replace(/{score}/g, score);
-}
-
-function PickRoast({ matchId, matchStatus, userName, pts, matchName, score }) {
-  if (matchStatus !== "finished" || !pts || !userName) return null;
-  const roast = generatePickRoast(matchId, userName, pts, matchName, score);
-  return (
-    <div className="pick-roast">
-      <span className="pick-roast-flame">🔥</span>
-      <p className="pick-roast-text">{roast}</p>
-    </div>
-  );
-}
-
-function History({ matches, predictions, user }) {
-  const [nickname, setNickname] = useState("");
-  useEffect(
-    () =>
-      onSnapshot(doc(db, "users", user.uid), (s) =>
-        setNickname(s.exists() ? s.data().nickname || s.data().displayName || "" : "")
-      ),
-    [user.uid]
-  );
-
+function History({ matches, predictions }) {
   const rows = matches
     .filter((m) => predictions[m.id])
     .slice()
@@ -388,8 +413,6 @@ function History({ matches, predictions, user }) {
   if (rows.length === 0)
     return <p className="empty">No picks yet — head to Fixtures and call some scores.</p>;
 
-  const displayName = nickname || user.displayName || "You";
-
   return (
     <>
       <h2 className="section-label">All picks</h2>
@@ -397,7 +420,6 @@ function History({ matches, predictions, user }) {
         {rows.map((m) => {
           const p = predictions[m.id];
           const pts = pointsFor(p, m);
-          const score = m.status === "finished" ? `${m.homeScore}-${m.awayScore}` : null;
           return (
             <li key={m.id} className="pick-row">
               <span className="pick-teams">
@@ -417,16 +439,6 @@ function History({ matches, predictions, user }) {
               >
                 {pts === null ? "" : `+${pts}`}
               </span>
-              {pts > 0 && (
-                <PickRoast
-                  matchId={m.id}
-                  matchStatus={m.status}
-                  userName={displayName}
-                  pts={pts}
-                  matchName={`${m.home} v ${m.away}`}
-                  score={score}
-                />
-              )}
             </li>
           );
         })}
