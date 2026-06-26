@@ -265,7 +265,7 @@ function RevealedPicks({ group, members, matches }) {
       matches
         .filter((m) => m.kickoff?.toMillis && m.kickoff.toMillis() <= Date.now())
         .sort((a, b) => b.kickoff.toMillis() - a.kickoff.toMillis())
-        .slice(0, 5),
+        .slice(0, 3),
     [matches]
   );
 
@@ -338,6 +338,17 @@ function RevealedPicks({ group, members, matches }) {
                 leagueId={group.id}
                 matchId={m.id}
                 matchStatus={m.status}
+                matchLabel={`${m.home} v ${m.away}`}
+                score={`${m.homeScore}–${m.awayScore}`}
+                picks={named.map((r) => {
+                  const p = byUid?.get(r.id);
+                  const pts = p ? revealPoints(p, m) : null;
+                  return {
+                    name: (r.nickname || r.displayName || "Anon").split(" ")[0],
+                    prediction: p ? `${p.home}–${p.away}` : "—",
+                    pts,
+                  };
+                })}
               />
             )}
           </div>
