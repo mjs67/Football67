@@ -37,6 +37,11 @@ export default function App() {
   const [leaderTop, setLeaderTop] = useState(null); // { name, points }
   const [latestRoast, setLatestRoast] = useState(null); // { roastText, targetName, matchName, finalScore }
 
+  // SEO: set document title
+  useEffect(() => {
+    document.title = "Football67 — World Cup 2026 Score Predictor";
+  }, []);
+
   // Auth state
   useEffect(() => {
     return onAuthStateChanged(auth, (u) => {
@@ -329,6 +334,30 @@ export default function App() {
       <footer className="foot">
         football67.com · results by football-data.org · Not affiliated with FIFA.
       </footer>
+
+      {/* SEO: JSON-LD structured data */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify({
+          "@context": "https://schema.org",
+          "@type": "WebApplication",
+          "name": "Football67",
+          "url": "https://www.football67.com",
+          "description": "Predict the score of every World Cup 2026 fixture before kickoff. Exact score earns 5 pts, correct result earns 3 pts. Fill your knockout bracket and climb the leaderboard with friends.",
+          "applicationCategory": "SportsApplication",
+          "operatingSystem": "Web",
+          "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "GBP"
+          },
+          "publisher": {
+            "@type": "Organization",
+            "name": "Football67",
+            "url": "https://www.football67.com"
+          }
+        })}}
+      />
     </div>
   );
 }

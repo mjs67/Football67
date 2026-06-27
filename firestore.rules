@@ -128,15 +128,43 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Knockout bracket picks: owner-only, locked at the bracket deadline
+    // Knockout bracket picks: owner-only, per-round deadlines enforced.
+    //
+    // Write shape: the client sends exactly one dot-notation field at a time,
+    // e.g. { "rounds.0": { picks: {...}, lockedAt: <serverTimestamp> } }
+    // This lets Firestore merge only that round without overwriting siblings.
+    //
+    // Allowed top-level keys are the four round slots (rounds.0–rounds.3).
+    // Exactly one must be present per write (enforced by size() == 1).
+    //
+    // Deadline logic:
+    //   - Prefers per-round `deadlines` map on settings/bracket:
+    //       { deadlines: { "0": Timestamp, "1": Timestamp, ... } }
+    //   - Falls back to the legacy single `deadline` field so existing
+    //     deployments keep working during the migration window.
     match /brackets/{uid} {
       allow read: if request.auth != null && request.auth.uid == uid;
       allow create, update: if request.auth != null
         && request.auth.uid == uid
-        && request.resource.data.keys().hasOnly(['picks', 'updatedAt'])
-        && request.resource.data.picks is map
-        && request.time < get(/databases/$(database)/documents/settings/bracket).data.deadline;
+        && exactlyOneRoundKey()
+        && roundIsStillOpen();
       allow delete: if false;
+
+      function exactlyOneRoundKey() {
+        return request.resource.data.keys().hasOnly(['rounds.0','rounds.1','rounds.2','rounds.3'])
+          && request.resource.data.keys().size() == 1;
+      }
+
+      function roundIsStillOpen() {
+        let b = get(/databases/$(database)/documents/settings/bracket).data;
+        // Per-round deadlines (new format). Keys stored as strings in Firestore maps.
+        return (
+          (!('rounds.0' in request.resource.data) || request.time < b.deadlines['0'])
+          && (!('rounds.1' in request.resource.data) || request.time < b.deadlines['1'])
+          && (!('rounds.2' in request.resource.data) || request.time < b.deadlines['2'])
+          && (!('rounds.3' in request.resource.data) || request.time < b.deadlines['3'])
+        );
+      }
     }
 
     // Reminder bookkeeping: script-only
@@ -145,4 +173,3 @@ service cloud.firestore {
     }
   }
 }
-
