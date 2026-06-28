@@ -219,7 +219,7 @@ export default function App() {
             <span className="hero-pill-label">Correct result</span>
           </div>
           <div className="hero-pill">
-            <span className="hero-pill-val">10 pts</span>
+            <span className="hero-pill-val">bonus pts</span>
             <span className="hero-pill-label">Knockout bracket</span>
           </div>
         </div>
