@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 import { db } from "../firebase.js";
-import { matchProbs, pct, scoreP } from "../poisson.js";
+import { matchProbs, pct, predictKnockout, scoreP } from "../poisson.js";
 
 function pad(n) {
   return String(n).padStart(2, "0");
@@ -135,7 +135,7 @@ export default function MatchCard({ match, user, prediction, onRequireSignIn }) 
       </div>
 
       {match.odds && match.status !== "finished" && (
-        <OddsStrip odds={match.odds} home={home} away={away} locked={locked} />
+        <OddsStrip odds={match.odds} home={home} away={away} locked={locked} match={match} />
       )}
 
       {(match.homeForm || match.awayForm || match.h2h) && match.status !== "finished" && (
@@ -192,9 +192,11 @@ export default function MatchCard({ match, user, prediction, onRequireSignIn }) 
   );
 }
 
-function OddsStrip({ odds, home, away, locked }) {
+function OddsStrip({ odds, home, away, locked, match }) {
   const { ph, pd, pa, top } = matchProbs(odds.lh, odds.la);
   const yourP = scoreP(odds.lh, odds.la, home, away);
+  const ko = match?.phase === "knockout" ? predictKnockout(odds.lh, odds.la) : null;
+  const advancer = ko ? (ko.advancer === "H" ? match.home : match.away) : null;
   return (
     <div className="odds-strip">
       <div
@@ -207,7 +209,14 @@ function OddsStrip({ odds, home, away, locked }) {
         <span className="seg away" style={{ flexGrow: pa }}>{pct(pa)}%</span>
       </div>
       <p className="odds-note">
-        AI Model: most likely {top.h}–{top.a} ({pct(top.p)}%)
+        {ko ? (
+          <>
+            AI Model: {advancer} to advance
+            {ko.decided === "penalties" ? " on penalties" : ""} · most likely {ko.h}–{ko.a} ({pct(ko.p)}%)
+          </>
+        ) : (
+          <>AI Model: most likely {top.h}–{top.a} ({pct(top.p)}%)</>
+        )}
         {!locked && (
           <>
             {" "}· your call {home}–{away} ({pct(yourP)}%)

@@ -29,6 +29,21 @@ export function matchProbs(lh, la) {
   return { ph, pd, pa, top };
 }
 
+// Knockout prediction: a knockout can't stand level, so collapse the draw.
+// Take the most likely scoreline — if it's decisive, the winning side
+// advances in regulation; if it's level, treat the tie as going to a
+// shootout and award it to the side with the higher regulation win prob.
+// NOTE: the model only knows expected goals. "penalties" here means
+// "most likely to finish level", NOT an actual shootout prediction.
+// Returns { advancer: "H" | "A", decided: "regulation" | "penalties", h, a, p }.
+export function predictKnockout(lh, la) {
+  const { ph, pa, top } = matchProbs(lh, la);
+  if (top.h !== top.a) {
+    return { advancer: top.h > top.a ? "H" : "A", decided: "regulation", h: top.h, a: top.a, p: top.p };
+  }
+  return { advancer: ph >= pa ? "H" : "A", decided: "penalties", h: top.h, a: top.a, p: top.p };
+}
+
 // Method B: pick whichever of ph/pd/pa is highest as the predicted result.
 // More accurate than reading the result off the single most-likely scoreline
 // (top), because home-win probability is spread across many scorelines
