@@ -61,3 +61,61 @@ export function pct(p) {
   if (n > 0 && n < 1) return "<1";
   return String(Math.round(n));
 }
+
+// Which side ("home" | "away") went through from a finished knockout tie,
+// or null. The sync (syncMatches.js) resolves the real winner into
+// `advancedTeam` even when the full-time score is level (ET/penalties).
+// Falls back to the scoreline for a decisive knockout that lacks the field.
+export function advancedSide(match) {
+  if (!match || match.phase !== "knockout") return null;
+  if (match.advancedTeam && match.advancedTeam === match.home) return "home";
+  if (match.advancedTeam && match.advancedTeam === match.away) return "away";
+  if (
+    match.status === "finished" &&
+    match.homeScore != null &&
+    match.awayScore != null &&
+    match.homeScore !== match.awayScore
+  ) {
+    return match.homeScore > match.awayScore ? "home" : "away";
+  }
+  return null; // level with no resolved winner — genuinely undecided
+}
+
+// Which side a prediction backs to advance. A decisive scoreline implies its
+// own winner; a level scoreline uses the explicit shootout pick (pred.advance).
+export function predictedAdvanceSide(pred) {
+  if (!pred) return null;
+  if (pred.home > pred.away) return "home";
+  if (pred.away > pred.home) return "away";
+  return pred.advance ?? null;
+}
+
+// Single source of truth for scoring one prediction against a finished match.
+// GROUP games: exact score = 5 OR correct result = 3 (mutually exclusive).
+// KNOCKOUT games: the three components STACK —
+//   exact score        +5
+//   correct result     +3   (always also true when the score is exact)
+//   who advances        +2   (predicted advancer == the side that went through,
+//                             whether decided in 90 mins, ET, or penalties)
+//   → up to 10 points on a perfect knockout call.
+// Returns null until the match is finished.
+export function scorePrediction(pred, match) {
+  if (!pred || !match || match.status !== "finished") return null;
+
+  const exact = pred.home === match.homeScore && pred.away === match.awayScore;
+  const result =
+    Math.sign(pred.home - pred.away) === Math.sign(match.homeScore - match.awayScore);
+
+  if (match.phase !== "knockout") {
+    const base = exact ? 5 : result ? 3 : 0;
+    return { base, bonus: 0, total: base, exact, result, advanceHit: false, knockout: false };
+  }
+
+  const base = (exact ? 5 : 0) + (result ? 3 : 0);
+  const actual = advancedSide(match);
+  const mine = predictedAdvanceSide(pred);
+  const advanceHit = !!actual && !!mine && actual === mine;
+  const bonus = advanceHit ? 2 : 0;
+
+  return { base, bonus, total: base + bonus, exact, result, advanceHit, knockout: true };
+}

@@ -1,12 +1,14 @@
-// Shared leaderboard recompute. Scoring is delegated to scorePrediction in
-// src/poisson.js — the SAME function the UI uses — so the table can never
-// drift from what each card shows. Group games: exact 5 OR result 3.
+// Shared leaderboard recompute. Group games: exact 5 OR result 3.
 // Knockout games: exact +5, result +3, and who-advances +2 all STACK
 // (up to 10), with the advance bonus paid whenever the predicted advancer
 // matches the side that actually went through (90 mins, ET, or penalties).
 //
+// The scoring helpers below are an exact mirror of src/poisson.js
+// (scorePrediction / advancedSide / predictedAdvanceSide). They're inlined
+// here on purpose: this script runs under plain Node in CI and must not reach
+// across into the Vite `src/` tree. If you change the rules, change BOTH.
+//
 // Also computes tiebreaker distance once settings/tiebreaker.answer is set.
-import { scorePrediction } from "../src/poisson.js";
 // Stage Tables: alongside the all-time totals (points/exact/results), also
 // buckets the same numbers by tournament phase (groupPoints/knockoutPoints
 // etc.) so the leaderboard can offer a Group Stage and Knockout view that
@@ -23,6 +25,48 @@ import { scorePrediction } from "../src/poisson.js";
 function phaseOf(m) {
   if (m.phase === "group" || m.phase === "knockout") return m.phase;
   return m.competition && m.competition.includes("Group") ? "group" : "knockout";
+}
+
+// ── Scoring (mirror of src/poisson.js — keep in sync) ───────────────
+function advancedSide(match) {
+  if (!match || match.phase !== "knockout") return null;
+  if (match.advancedTeam && match.advancedTeam === match.home) return "home";
+  if (match.advancedTeam && match.advancedTeam === match.away) return "away";
+  if (
+    match.status === "finished" &&
+    match.homeScore != null &&
+    match.awayScore != null &&
+    match.homeScore !== match.awayScore
+  ) {
+    return match.homeScore > match.awayScore ? "home" : "away";
+  }
+  return null;
+}
+
+function predictedAdvanceSide(pred) {
+  if (!pred) return null;
+  if (pred.home > pred.away) return "home";
+  if (pred.away > pred.home) return "away";
+  return pred.advance ?? null;
+}
+
+function scorePrediction(pred, match) {
+  if (!pred || !match || match.status !== "finished") return null;
+  const exact = pred.home === match.homeScore && pred.away === match.awayScore;
+  const result =
+    Math.sign(pred.home - pred.away) === Math.sign(match.homeScore - match.awayScore);
+
+  if (match.phase !== "knockout") {
+    const base = exact ? 5 : result ? 3 : 0;
+    return { base, bonus: 0, total: base, exact, result, advanceHit: false, knockout: false };
+  }
+
+  const base = (exact ? 5 : 0) + (result ? 3 : 0);
+  const actual = advancedSide(match);
+  const mine = predictedAdvanceSide(pred);
+  const advanceHit = !!actual && !!mine && actual === mine;
+  const bonus = advanceHit ? 2 : 0;
+  return { base, bonus, total: base + bonus, exact, result, advanceHit, knockout: true };
 }
 
 export async function recomputeLeaderboard(db) {
