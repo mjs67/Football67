@@ -17,12 +17,10 @@ import MatchCard from "./components/MatchCard.jsx";
 import Leaderboard from "./components/Leaderboard.jsx";
 import MyPicks from "./components/MyPicks.jsx";
 import Groups from "./components/Groups.jsx";
-import Bracket from "./components/Bracket.jsx";
 
 const TABS = [
   { id: "fixtures", label: "Fixtures" },
   { id: "picks", label: "My Picks" },
-  { id: "bracket", label: "Bracket" },
   { id: "groups", label: "Leagues" },
   { id: "table", label: "Leaderboard" },
 ];
@@ -218,10 +216,6 @@ export default function App() {
             <span className="hero-pill-val">3 pts</span>
             <span className="hero-pill-label">Correct result</span>
           </div>
-          <div className="hero-pill">
-            <span className="hero-pill-val">bonus pts</span>
-            <span className="hero-pill-label">Knockout bracket</span>
-          </div>
         </div>
         {latestRoast ? (
           <div className="hero-roast-card hero-roast-card--live">
@@ -333,8 +327,6 @@ export default function App() {
           />
         )}
 
-        {tab === "bracket" && <Bracket user={user} onRequireSignIn={handleSignIn} />}
-
         {tab === "groups" && <Groups user={user} matches={matches} onRequireSignIn={handleSignIn} />}
 
         {tab === "table" && <Leaderboard me={user} />}
@@ -352,7 +344,7 @@ export default function App() {
           "@type": "WebApplication",
           "name": "Football67",
           "url": "https://www.football67.com",
-          "description": "Predict the score of every World Cup 2026 fixture before kickoff. Exact score earns 5 pts, correct result earns 3 pts. Fill your knockout bracket and climb the leaderboard with friends.",
+          "description": "Predict the score of every World Cup 2026 fixture before kickoff. Exact score earns 5 pts, correct result earns 3 pts. Climb the leaderboard with friends.",
           "applicationCategory": "SportsApplication",
           "operatingSystem": "Web",
           "offers": {
