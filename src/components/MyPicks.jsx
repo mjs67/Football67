@@ -7,14 +7,19 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { sharePickCard } from "../shareCard.js";
-import { matchProbs } from "../poisson.js";
+import { matchProbs, predictKnockout, scorePrediction } from "../poisson.js";
 
-function pointsFor(pred, match) {
-  if (!pred || !match || match.status !== "finished") return null;
-  if (pred.home === match.homeScore && pred.away === match.awayScore) return 5;
-  if (Math.sign(pred.home - pred.away) === Math.sign(match.homeScore - match.awayScore))
-    return 3;
-  return 0;
+// AI's own prediction for a match (top scoreline + implied/most-likely
+// advancer on knockouts), scored under the same rules as the player.
+function aiPrediction(match) {
+  if (!match.odds) return null;
+  const { top } = matchProbs(match.odds.lh, match.odds.la);
+  const pred = { home: top.h, away: top.a };
+  if (match.phase === "knockout" && top.h === top.a) {
+    pred.advance =
+      predictKnockout(match.odds.lh, match.odds.la).advancer === "H" ? "home" : "away";
+  }
+  return pred;
 }
 
 export default function MyPicks({ user, matches, predictions, onRequireSignIn }) {
@@ -82,12 +87,6 @@ function ShareCardButton({ user, matches, predictions }) {
   );
 }
 
-function aiPickFor(match) {
-  if (!match.odds) return null;
-  const { top } = matchProbs(match.odds.lh, match.odds.la);
-  return { home: top.h, away: top.a };
-}
-
 function FormGraph({ matches, predictions }) {
   const settled = matches
     .filter((m) => m.status === "finished" && predictions[m.id])
@@ -95,12 +94,14 @@ function FormGraph({ matches, predictions }) {
 
   if (settled.length < 2) return null;
 
-  const userRows = settled.map((m) => pointsFor(predictions[m.id], m));
-  const aiRows = settled.map((m) => {
-    const ai = aiPickFor(m);
-    return ai ? pointsFor(ai, m) : 0;
+  const userScores = settled.map((m) => scorePrediction(predictions[m.id], m));
+  const aiScores = settled.map((m) => {
+    const ai = aiPrediction(m);
+    return ai ? scorePrediction(ai, m) : null;
   });
-  const hasAi = aiRows.some((p) => p !== null && p !== undefined);
+  const userRows = userScores.map((s) => s?.total ?? 0);
+  const aiRows = aiScores.map((s) => s?.total ?? 0);
+  const hasAi = aiScores.some((s) => s !== null && s !== undefined);
 
   const W = 600, H = 140, padX = 6, padY = 14;
 
@@ -117,13 +118,20 @@ function FormGraph({ matches, predictions }) {
   const userLine = cumUser.map((v, i) => `${x(i)},${y(v)}`).join(" ");
   const aiLine   = cumAi.map((v, i)   => `${x(i)},${y(v)}`).join(" ");
 
-  const userExact  = userRows.filter((p) => p === 5).length;
-  const userResult = userRows.filter((p) => p === 3).length;
-  const userAcc    = Math.round(((userExact + userResult) / settled.length) * 100);
+  // Dot size/colour keys off whether the call landed exact / a result / a
+  // points-scoring call at all (total > 0), so stacked knockout totals still
+  // render sensibly rather than only matching the old literal 5/3 values.
+  const rank = (s) => (s?.exact ? 2 : s?.total > 0 ? 1 : 0);
+  const userRank = userScores.map(rank);
+  const aiRank = aiScores.map(rank);
 
-  const aiExact    = aiRows.filter((p) => p === 5).length;
-  const aiResult   = aiRows.filter((p) => p === 3).length;
-  const aiAcc      = hasAi ? Math.round(((aiExact + aiResult) / settled.length) * 100) : null;
+  const userExact  = userScores.filter((s) => s?.exact).length;
+  const userResult = userScores.filter((s) => s?.result && !s?.exact).length;
+  const userAcc    = Math.round((userScores.filter((s) => (s?.total ?? 0) > 0).length / settled.length) * 100);
+
+  const aiExact    = aiScores.filter((s) => s?.exact).length;
+  const aiResult   = aiScores.filter((s) => s?.result && !s?.exact).length;
+  const aiAcc      = hasAi ? Math.round((aiScores.filter((s) => (s?.total ?? 0) > 0).length / settled.length) * 100) : null;
 
   const ptsDiff = cumUser[cumUser.length - 1] - (hasAi ? cumAi[cumAi.length - 1] : 0);
 
@@ -153,7 +161,7 @@ function FormGraph({ matches, predictions }) {
                 key={"ai" + i}
                 cx={x(i)}
                 cy={y(v)}
-                r={aiRows[i] === 5 ? 5 : aiRows[i] === 3 ? 4 : 2.5}
+                r={aiRank[i] === 2 ? 5 : aiRank[i] === 1 ? 4 : 2.5}
                 fill="var(--blue)"
                 opacity="0.75"
               />
@@ -167,8 +175,8 @@ function FormGraph({ matches, predictions }) {
             key={"u" + i}
             cx={x(i)}
             cy={y(v)}
-            r={userRows[i] === 5 ? 5 : userRows[i] === 3 ? 4 : 2.5}
-            fill={userRows[i] === 5 ? "var(--volt)" : userRows[i] === 3 ? "var(--chalk)" : "var(--chalk-25)"}
+            r={userRank[i] === 2 ? 5 : userRank[i] === 1 ? 4 : 2.5}
+            fill={userRank[i] === 2 ? "var(--volt)" : userRank[i] === 1 ? "var(--chalk)" : "var(--chalk-25)"}
           />
         ))}
       </svg>
@@ -220,25 +228,25 @@ function StatsRow({ matches, predictions }) {
   let points = 0,
     exact = 0,
     results = 0,
+    advances = 0,
     made = 0;
   matches.forEach((m) => {
     const p = predictions[m.id];
     if (!p) return;
     made++;
-    const pts = pointsFor(p, m);
-    if (pts === 5) {
-      points += 5;
-      exact++;
-    } else if (pts === 3) {
-      points += 3;
-      results++;
-    }
+    const s = scorePrediction(p, m);
+    if (!s) return;
+    points += s.total;
+    if (s.exact) exact++;
+    else if (s.result) results++;
+    if (s.advanceHit) advances++;
   });
   return (
     <div className="stats-row">
       <Stat label="Points" value={points} accent />
       <Stat label="Exact scores" value={exact} />
       <Stat label="Right results" value={results} />
+      <Stat label="Advance hits" value={advances} />
       <Stat label="Picks made" value={made} />
     </div>
   );
@@ -419,7 +427,8 @@ function History({ matches, predictions }) {
       <ol className="picks">
         {rows.map((m) => {
           const p = predictions[m.id];
-          const pts = pointsFor(p, m);
+          const s = scorePrediction(p, m);
+          const cls = s === null ? "" : s.exact ? " gold" : s.total > 0 ? " ok" : " zero";
           return (
             <li key={m.id} className="pick-row">
               <span className="pick-teams">
@@ -427,17 +436,14 @@ function History({ matches, predictions }) {
               </span>
               <span className="pick-called">
                 {p.home}–{p.away}
+                {s?.advanceHit && <i className="adv-tag" title="Called who advanced (+2)">▲</i>}
                 {p.autoPicked && <i className="auto-tag" title="Auto-pick">A</i>}
               </span>
               <span className="pick-actual">
                 {m.status === "finished" ? `FT ${m.homeScore}–${m.awayScore}` : "—"}
               </span>
-              <span
-                className={
-                  "pick-pts" + (pts === 5 ? " gold" : pts === 3 ? " ok" : pts === 0 ? " zero" : "")
-                }
-              >
-                {pts === null ? "" : `+${pts}`}
+              <span className={"pick-pts" + cls}>
+                {s === null ? "" : `+${s.total}`}
               </span>
             </li>
           );

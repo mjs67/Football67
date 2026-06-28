@@ -1,6 +1,12 @@
-// Shared leaderboard recompute: exact = 5, correct result = 3.
-// Also computes tiebreaker distance once settings/tiebreaker.answer is set.
+// Shared leaderboard recompute. Scoring is delegated to scorePrediction in
+// src/poisson.js — the SAME function the UI uses — so the table can never
+// drift from what each card shows. Group games: exact 5 OR result 3.
+// Knockout games: exact +5, result +3, and who-advances +2 all STACK
+// (up to 10), with the advance bonus paid whenever the predicted advancer
+// matches the side that actually went through (90 mins, ET, or penalties).
 //
+// Also computes tiebreaker distance once settings/tiebreaker.answer is set.
+import { scorePrediction } from "../src/poisson.js";
 // Stage Tables: alongside the all-time totals (points/exact/results), also
 // buckets the same numbers by tournament phase (groupPoints/knockoutPoints
 // etc.) so the leaderboard can offer a Group Stage and Knockout view that
@@ -34,7 +40,7 @@ export async function recomputeLeaderboard(db) {
   });
 
   for (const p of preds.docs) {
-    const { uid, matchId, home, away, displayName, photoURL } = p.data();
+    const { uid, matchId, home, away, advance, displayName, photoURL } = p.data();
     const m = results.get(matchId);
     const t = totals.get(uid) || blankRow();
     if (m) {
@@ -46,16 +52,22 @@ export async function recomputeLeaderboard(db) {
       const countKey = phase === "group" ? "groupPredictionsCount" : "knockoutPredictionsCount";
       t[countKey] += 1;
 
-      if (home === m.homeScore && away === m.awayScore) {
-        t.points += 5;
-        t.exact += 1;
-        t[pointsKey] += 5;
-        t[exactKey] += 1;
-      } else if (Math.sign(home - away) === Math.sign(m.homeScore - m.awayScore)) {
-        t.points += 3;
-        t.results += 1;
-        t[pointsKey] += 3;
-        t[resultsKey] += 1;
+      // Normalise phase onto the match so scorePrediction's knockout-stacking
+      // path matches the leaderboard's phase buckets (phaseOf can infer phase
+      // for older matches that predate the `phase` field).
+      const s = scorePrediction({ home, away, advance }, { ...m, phase });
+      if (s) {
+        t.points += s.total;
+        t[pointsKey] += s.total;
+        // Counts stay descriptive: an exact is tallied as exact; a non-exact
+        // correct result as a result. Points already reflect the stacking.
+        if (s.exact) {
+          t.exact += 1;
+          t[exactKey] += 1;
+        } else if (s.result) {
+          t.results += 1;
+          t[resultsKey] += 1;
+        }
       }
     }
     if (displayName) t.displayName = displayName;

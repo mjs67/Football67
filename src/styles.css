@@ -885,3 +885,146 @@ html, body { overflow-x: hidden; }
   letter-spacing: 0.06em;
   color: var(--chalk-25);
 }
+
+/* ── Knockout: who-goes-through pick + scoring explainer ─────── */
+.ko-advance {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--chalk-12);
+}
+.ko-advance-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-family: var(--display);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--chalk-60);
+  text-align: center;
+}
+.ko-bonus-chip {
+  font-family: var(--numeral);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--volt-ink);
+  background: var(--volt);
+  border-radius: 5px;
+  padding: 1px 6px;
+  line-height: 1.4;
+}
+.ko-advance-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.ko-team-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 8px 12px;
+  border: 1px solid var(--chalk-12);
+  border-radius: 8px;
+  background: var(--pitch-deep);
+  color: var(--chalk);
+  cursor: pointer;
+  font: inherit;
+  transition: border-color 0.12s, background 0.12s, box-shadow 0.12s;
+}
+.ko-team-btn:hover { border-color: var(--chalk-25); }
+.ko-team-btn:focus-visible { outline: 2px solid var(--volt); outline-offset: 2px; }
+.ko-team-btn.on {
+  border-color: var(--volt);
+  background: rgba(200, 255, 30, 0.1);
+  box-shadow: inset 0 0 0 1px var(--volt);
+}
+.ko-team { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.ko-crest { width: 20px; height: 20px; object-fit: contain; flex: none; }
+.ko-flag { font-size: 18px; line-height: 1; flex: none; }
+.ko-tname {
+  font-family: var(--display);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-weight: 600;
+  font-size: 15px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ko-check { color: var(--volt); font-weight: 700; flex: none; }
+.ko-advance-note {
+  margin: 8px 0 0;
+  text-align: center;
+  font-size: 11.5px;
+  font-style: italic;
+  color: var(--chalk-25);
+}
+
+/* Small-but-readable scoring explainer under every knockout card */
+.ko-score-legend {
+  margin: 12px 0 0;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--chalk-60);
+}
+.ko-score-legend b {
+  font-family: var(--numeral);
+  font-variant-numeric: tabular-nums;
+  color: var(--volt);
+  font-weight: 700;
+}
+
+/* "called who advanced" marker in the My Picks history list */
+.adv-tag {
+  font-style: normal;
+  font-size: 9px;
+  font-weight: 700;
+  vertical-align: super;
+  margin-left: 4px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(200, 255, 30, 0.16);
+  color: var(--volt);
+}
+
+/* ── Hero scoring pills ──────────────────────────────────────── */
+.hero-pills {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin: 20px auto 4px;
+}
+.hero-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 104px;
+  padding: 10px 16px;
+  border: 1px solid var(--chalk-12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.hero-pill-val {
+  font-family: var(--numeral);
+  font-variant-numeric: tabular-nums;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--volt);
+  line-height: 1;
+}
+.hero-pill-label {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--chalk-60);
+  text-align: center;
+}
+.hero-pill--ko { border-color: rgba(200, 255, 30, 0.35); }

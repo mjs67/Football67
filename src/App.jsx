@@ -13,6 +13,7 @@ import {
   where,
 } from "firebase/firestore";
 import { auth, db, googleProvider } from "./firebase.js";
+import { scorePrediction } from "./poisson.js";
 import MatchCard from "./components/MatchCard.jsx";
 import Leaderboard from "./components/Leaderboard.jsx";
 import MyPicks from "./components/MyPicks.jsx";
@@ -143,13 +144,8 @@ export default function App() {
   const myPoints = useMemo(() => {
     let pts = 0;
     matches.forEach((m) => {
-      const p = predictions[m.id];
-      if (!p || m.status !== "finished") return;
-      if (p.home === m.homeScore && p.away === m.awayScore) pts += 5;
-      else if (
-        Math.sign(p.home - p.away) === Math.sign(m.homeScore - m.awayScore)
-      )
-        pts += 3;
+      const s = scorePrediction(predictions[m.id], m);
+      if (s) pts += s.total;
     });
     return pts;
   }, [matches, predictions]);
@@ -215,6 +211,10 @@ export default function App() {
           <div className="hero-pill">
             <span className="hero-pill-val">3 pts</span>
             <span className="hero-pill-label">Correct result</span>
+          </div>
+          <div className="hero-pill hero-pill--ko">
+            <span className="hero-pill-val">+2 pts</span>
+            <span className="hero-pill-label">Who advances · knockouts</span>
           </div>
         </div>
         {latestRoast ? (
@@ -344,7 +344,7 @@ export default function App() {
           "@type": "WebApplication",
           "name": "Football67",
           "url": "https://www.football67.com",
-          "description": "Predict the score of every World Cup 2026 fixture before kickoff. Exact score earns 5 pts, correct result earns 3 pts. Climb the leaderboard with friends.",
+          "description": "Predict the score of every World Cup 2026 fixture before kickoff. Exact score earns 5 pts, correct result earns 3 pts, and in the knockouts a +2 bonus stacks on top for calling who goes through. Climb the leaderboard with friends.",
           "applicationCategory": "SportsApplication",
           "operatingSystem": "Web",
           "offers": {

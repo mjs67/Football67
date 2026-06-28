@@ -24,6 +24,10 @@ service cloud.firestore {
         && request.resource.data.away is int
         && request.resource.data.home >= 0 && request.resource.data.home <= 15
         && request.resource.data.away >= 0 && request.resource.data.away <= 15
+        && (!('advance' in request.resource.data)
+            || request.resource.data.advance == null
+            || request.resource.data.advance == 'home'
+            || request.resource.data.advance == 'away')
         && get(/databases/$(database)/documents/matches/$(request.resource.data.matchId)).data.status == 'upcoming'
         && get(/databases/$(database)/documents/matches/$(request.resource.data.matchId)).data.kickoff > request.time;
       allow delete: if false;
