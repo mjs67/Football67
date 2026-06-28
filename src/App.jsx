@@ -209,11 +209,20 @@ export default function App() {
           <em>Before the whistle.</em>
         </h1>
         <p className="hero-roast-tagline">Correct Result gets you Roasted! 🔥</p>
-        <p className="hero-sub">
-          Lock in a scoreline for every fixture before kickoff. Exact score
-          pays <b>5&nbsp;pts</b>, the right result pays <b>3&nbsp;pts</b>.
-          Get it right and the site roasts you for it.
-        </p>
+        <div className="hero-pills">
+          <div className="hero-pill">
+            <span className="hero-pill-val">5 pts</span>
+            <span className="hero-pill-label">Exact score</span>
+          </div>
+          <div className="hero-pill">
+            <span className="hero-pill-val">3 pts</span>
+            <span className="hero-pill-label">Correct result</span>
+          </div>
+          <div className="hero-pill">
+            <span className="hero-pill-val">10 pts</span>
+            <span className="hero-pill-label">Knockout bracket</span>
+          </div>
+        </div>
         {latestRoast ? (
           <div className="hero-roast-card hero-roast-card--live">
             <div className="hero-roast-header">

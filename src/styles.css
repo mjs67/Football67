@@ -236,6 +236,39 @@ body {
 }
 .hero-sub b { color: var(--volt); font-family: var(--numeral); }
 
+/* ── Hero scoring pills ────────────────────────────────────── */
+.hero-pills {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin: 18px auto 24px;
+  flex-wrap: wrap;
+}
+.hero-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  background: rgba(244, 244, 240, 0.04);
+  border: 1px solid var(--chalk-12);
+  border-radius: 8px;
+  padding: 10px 20px;
+  min-width: 100px;
+}
+.hero-pill-val {
+  font-family: var(--numeral);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--volt);
+}
+.hero-pill-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--chalk-60);
+}
+
 /* ── Hero roast card ───────────────────────────────────────── */
 .hero-roast-card {
   margin: 20px auto 0;
