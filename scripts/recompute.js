@@ -15,29 +15,23 @@
 // whether or not it scored — the denominator for the leaderboard's
 // points-per-prediction column.
 //
-// Bracket picks schema (new rolling-deadline format):
-//   brackets/{uid}.rounds = {
-//     0: { picks: { "r0-0": "Argentina", ... }, lockedAt: Timestamp },
-//     1: { picks: { "r1-0": "Argentina", ... }, lockedAt: Timestamp },
-//     ...
+// Bracket scoring schema (champion-tier model):
+//   brackets/{uid}.champion = {
+//     team: "France",   // the user's current champion pick
+//     tier: 1,          // round-window (0=R16,1=QF,2=SF,3=Final) in which
+//                       // the CURRENT team was last set — lower = earlier =
+//                       // more points. Re-picking re-stamps this.
+//     history: { 0: "Argentina", 1: "France" }  // optional, audit/share
 //   }
-//   Legacy format (flat picks) is also supported for migration.
+//   Only the champion pick scores. Points come from settings/bracket.tierPoints
+//   indexed by `tier`, awarded only if `team` === settings/bracket.winner.
+//
+//   The full fillable tree (brackets/{uid}.rounds[r].picks) is kept for the
+//   visual + share card but does NOT score. Legacy flat `picks` is ignored
+//   for scoring under this model.
 function phaseOf(m) {
   if (m.phase === "group" || m.phase === "knockout") return m.phase;
   return m.competition && m.competition.includes("Group") ? "group" : "knockout";
-}
-
-// Merge bracket document picks into a single flat map regardless of schema version.
-function mergeBracketPicks(docData) {
-  if (docData.rounds) {
-    const merged = {};
-    for (const rData of Object.values(docData.rounds)) {
-      Object.assign(merged, rData.picks || {});
-    }
-    return merged;
-  }
-  // Legacy flat format
-  return docData.picks || {};
 }
 
 export async function recomputeLeaderboard(db) {
@@ -84,24 +78,42 @@ export async function recomputeLeaderboard(db) {
     totals.set(uid, t);
   }
 
-  // Knockout bracket points — these are inherently part of the knockout
-  // competition, so they count toward knockoutPoints too, not just the
-  // all-time total.
+  // Knockout champion-tier points — the user's single champion prediction,
+  // scored by the round-window in which they locked it, paid only if that
+  // team actually won the tournament. Part of the knockout competition.
+  //
+  // The tournament winner is derived from the finished final match (single
+  // source of truth in the `matches` collection), not a field on settings.
   const bracketDoc = await db.doc("settings/bracket").get();
   if (bracketDoc.exists) {
     const b = bracketDoc.data();
-    const bracketResults = b.results || {};
-    if (Object.keys(bracketResults).length > 0) {
+    const tierPoints = b.tierPoints || [20, 14, 9, 5];
+    const finalSlot = `r${(b.rounds ?? 4) - 1}-0`;
+
+    // Find the finished final match by its bracket slot.
+    let winner = null;
+    const finalSnap = await db
+      .collection("matches")
+      .where("bracketSlot", "==", finalSlot)
+      .where("status", "==", "finished")
+      .get();
+    if (!finalSnap.empty) {
+      const fm = finalSnap.docs[0].data();
+      winner =
+        fm.advancedTeam ||
+        (fm.homeScore != null && fm.awayScore != null && fm.homeScore !== fm.awayScore
+          ? fm.homeScore > fm.awayScore ? fm.home : fm.away
+          : null);
+    }
+
+    if (winner) {
       const allBrackets = await db.collection("brackets").get();
       for (const doc of allBrackets.docs) {
-        // Support both new rounds-based schema and legacy flat picks
-        const picks = mergeBracketPicks(doc.data());
+        const champ = doc.data().champion;
         let bracketPoints = 0;
-        for (const [matchId, winner] of Object.entries(bracketResults)) {
-          const round = Number(matchId.match(/^r(\d+)-/)?.[1] ?? -1);
-          if (round >= 0 && picks[matchId] === winner) {
-            bracketPoints += b.points?.[round] ?? 0;
-          }
+        if (champ && champ.team === winner) {
+          const tier = Number(champ.tier ?? tierPoints.length - 1);
+          bracketPoints = tierPoints[tier] ?? 0;
         }
         const row = totals.get(doc.id) || blankRow();
         row.points += bracketPoints;

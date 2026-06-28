@@ -62,6 +62,12 @@ const res = await fetchWithRetry(url, { headers: { "X-Auth-Token": TOKEN } });
 const data = await res.json();
 console.log(`Fetched ${data.matches.length} season matches for ${COMP}.`);
 
+// Keep the FULL season match list (before any windowing) so knockout bracket
+// slot numbering is stable — slots are assigned by a match's position within
+// its entire stage, which must not shift just because some matches fall
+// outside the rolling import window below.
+const allSeasonMatches = data.matches.slice();
+
 // ── Pre-match stats: last-5 form per team + head-to-head this season ──
 const teamName = (t) => t.shortName || t.name;
 const finishedSeason = data.matches
@@ -196,6 +202,66 @@ function stageLabel(m) {
   return "";
 }
 
+// ── Machine-readable knockout tagging ──
+// The bracket derives team eliminations straight from the `matches`
+// collection (single source of truth — no separate results map). For that
+// it needs each knockout match tagged with its round index and bracket slot.
+// football-data.org returns knockout matches in bracket order, so the slot =
+// the match's position (by kickoff) within its stage. Built from the full
+// season list so numbering is stable regardless of the import window.
+//
+// Round index is RELATIVE to the bracket's first knockout stage (mirrors
+// scripts/bracket.js `auto`): LAST_16 is round 0 for a 16-team bracket but
+// round 1 for a 32-team bracket.
+const KO_STAGE_ORDER = ["LAST_32", "LAST_16", "QUARTER_FINALS", "SEMI_FINALS", "FINAL"];
+const koStagesPresent = KO_STAGE_ORDER.filter((s) =>
+  allSeasonMatches.some((m) => m.stage === s)
+);
+const firstKoStageIdx = koStagesPresent.length
+  ? KO_STAGE_ORDER.indexOf(koStagesPresent[0])
+  : -1;
+
+const koTags = new Map(); // externalId -> { round, bracketSlot }
+if (firstKoStageIdx >= 0) {
+  for (let s = firstKoStageIdx; s < KO_STAGE_ORDER.length; s++) {
+    const stage = KO_STAGE_ORDER[s];
+    const round = s - firstKoStageIdx;
+    const stageMatches = allSeasonMatches
+      .filter((m) => m.stage === stage)
+      .sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate));
+    stageMatches.forEach((m, i) => {
+      koTags.set(m.id, { round, bracketSlot: `r${round}-${i}` });
+    });
+  }
+}
+
+// phase/round/slot for a match. Group matches carry phase only; the
+// third-place playoff is knockout-phase but has no bracket slot.
+function knockoutFields(m) {
+  if (m.group) return { phase: "group", round: null, bracketSlot: null };
+  const tag = koTags.get(m.id);
+  if (tag) return { phase: "knockout", round: tag.round, bracketSlot: tag.bracketSlot };
+  if (STAGE_NAMES[m.stage]) return { phase: "knockout", round: null, bracketSlot: null };
+  return { phase: "group", round: null, bracketSlot: null };
+}
+
+// Which team advanced from a finished knockout match. football-data.org
+// reports the full-time score as level when a tie is settled by extra time
+// or penalties, exposing the actual winner via score.winner (HOME_TEAM /
+// AWAY_TEAM). We resolve to a team name so the bracket never stalls on a
+// drawn-but-decided knockout (e.g. a penalty shootout).
+function advancingTeam(m) {
+  if (m.status !== "FINISHED") return null;
+  const home = m.homeTeam.shortName || m.homeTeam.name;
+  const away = m.awayTeam.shortName || m.awayTeam.name;
+  const w = m.score?.winner;
+  if (w === "HOME_TEAM") return home;
+  if (w === "AWAY_TEAM") return away;
+  const hs = m.score?.fullTime?.home, as = m.score?.fullTime?.away;
+  if (hs != null && as != null && hs !== as) return hs > as ? home : away;
+  return null; // genuinely undecided
+}
+
 // Venue lookup: stadium keyword → "City, Country" (scripts/venues.json)
 let venuePlaces = {};
 try {
@@ -236,6 +302,7 @@ for (const m of data.matches) {
   if (finished) settled++;
 
   const ref = db.collection("matches").doc(`fd_${m.id}`);
+  const ko = knockoutFields(m);
   batch.set(
     ref,
     {
@@ -246,6 +313,14 @@ for (const m of data.matches) {
       homeFlag: m.homeTeam.crest || "⚽",
       awayFlag: m.awayTeam.crest || "⚽",
       competition: stageLabel(m) ? `${compName} · ${stageLabel(m)}` : compName,
+      // Machine-readable phase/bracket tags — drive leaderboard phase buckets
+      // (recompute.js phaseOf) and the bracket's elimination detection.
+      phase: ko.phase,
+      round: ko.round,
+      bracketSlot: ko.bracketSlot,
+      // For knockout slots: the team that advanced (handles ET/penalties,
+      // where the full-time score is level). Null for group/undecided.
+      advancedTeam: ko.bracketSlot ? advancingTeam(m) : null,
       venue: venueLabel(m),
       kickoff: admin.firestore.Timestamp.fromDate(new Date(m.utcDate)),
       status: finished ? "finished" : "upcoming",

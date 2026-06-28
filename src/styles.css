@@ -236,39 +236,6 @@ body {
 }
 .hero-sub b { color: var(--volt); font-family: var(--numeral); }
 
-/* ── Hero scoring pills ────────────────────────────────────── */
-.hero-pills {
-  display: flex;
-  justify-content: center;
-  gap: 10px;
-  margin: 18px auto 24px;
-  flex-wrap: wrap;
-}
-.hero-pill {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  background: rgba(244, 244, 240, 0.04);
-  border: 1px solid var(--chalk-12);
-  border-radius: 8px;
-  padding: 10px 20px;
-  min-width: 100px;
-}
-.hero-pill-val {
-  font-family: var(--numeral);
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--volt);
-}
-.hero-pill-label {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--chalk-60);
-}
-
 /* ── Hero roast card ───────────────────────────────────────── */
 .hero-roast-card {
   margin: 20px auto 0;
@@ -1105,3 +1072,73 @@ html, body { overflow-x: hidden; }
   letter-spacing: 0.06em;
   color: var(--chalk-25);
 }
+
+/* ── Champion-tier additions (champion-pick scoring model) ──── */
+.b-champ.won {
+  color: var(--volt);
+  border-color: var(--volt);
+  box-shadow: 0 0 24px rgba(200, 255, 30, 0.22);
+}
+
+/* Tier readout under the champion trophy */
+.b-champ-tier {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 8px;
+  text-align: center;
+}
+.b-champ-tier-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--chalk-60);
+}
+.b-champ-tier-pts {
+  font-family: var(--numeral);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--volt);
+  line-height: 1;
+}
+.b-champ-tier-when { font-size: 11px; color: var(--chalk-25); }
+
+/* Champion picker — tap a surviving team to commit at the current tier */
+.b-champ-picker { margin-top: 12px; }
+.b-champ-picker-hint {
+  font-size: 11px;
+  color: var(--chalk-60);
+  text-align: center;
+  margin: 0 0 6px;
+}
+.b-champ-options { display: flex; flex-direction: column; gap: 4px; }
+.b-champ-opt {
+  font-family: var(--display);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 13px;
+  text-align: left;
+  color: var(--chalk);
+  background: var(--pitch-deep);
+  border: 1px solid var(--chalk-12);
+  border-radius: 6px;
+  padding: 7px 10px;
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+.b-champ-opt:hover { border-color: var(--volt); }
+.b-champ-opt.selected {
+  border-color: var(--volt);
+  color: var(--volt);
+  box-shadow: inset 0 0 12px rgba(200, 255, 30, 0.14);
+}
+.b-champ-opt:focus-visible { outline: 2px solid var(--volt); outline-offset: 1px; }
+
+/* The champion pick, highlighted wherever it appears in the visual tree */
+.b-slot.is-champ {
+  border-color: var(--volt);
+  box-shadow: inset 0 0 10px rgba(200, 255, 30, 0.12);
+}
+.b-champ-star { color: var(--volt); font-weight: 700; }

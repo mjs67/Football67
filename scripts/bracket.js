@@ -1,4 +1,24 @@
-// Manage the knockout bracket predictor.
+// Manage the knockout bracket predictor (champion-tier scoring model).
+//
+// SCORING MODEL — "predict the tournament winner, locked by round":
+//   A user makes ONE prediction that scores: who wins the tournament.
+//   Points are set by WHICH ROUND'S LOCK-WINDOW was open when they last
+//   set their current champion pick — the earlier they commit, the more
+//   it is worth. They only collect if that pick actually wins the final.
+//
+//     Locked during Round-of-16 window → 20 pts
+//     Locked during Quarter-final window → 14 pts
+//     Locked during Semi-final window →  9 pts
+//     Locked during Final window      →  5 pts
+//
+//   A round's lock-window closes 1 hour before that round's first kickoff.
+//   Re-picking (because your team was eliminated, OR voluntarily) re-stamps
+//   the tier to whatever window is open at that moment. Re-confirming the
+//   SAME team does not change the tier.
+//
+//   The full bracket tree is still fillable (for the share card + visual),
+//   but only the champion pick scores. The champion's TIER lives on each
+//   user's brackets/{uid}.champion = { team, tier, history }.
 //
 // Auto-create from football-data.org API (once group stage is done):
 //   FOOTBALL_DATA_TOKEN=xxx COMPETITION=WC node scripts/bracket.js auto
@@ -15,16 +35,17 @@
 //     --deadline-r3 2026-07-14T18:00:00Z \
 //     "France,Argentina,Brazil,England,Spain,Germany,Portugal,Netherlands"
 //
-//   Shorthand: if all rounds share one deadline (old behaviour), use --deadline:
+//   Shorthand: if all rounds share one deadline, use --deadline:
 //   node scripts/bracket.js create --deadline 2026-06-28T16:00:00Z "France,..."
 //
-// Record a real winner as the tournament progresses (re-ranks everyone):
-//   node scripts/bracket.js result r0-2 "Spain"
-//
-//   Match ids: r0-N = first round, r1-N = next round, … (shown by `status`)
+// Record the tournament winner and per-slot results are NO LONGER manual:
+// the bracket derives every elimination and the champion winner straight
+// from the `matches` collection (finished knockout matches carry `phase`,
+// `round`, `bracketSlot`, and `advancedTeam`, stamped by syncMatches.js).
+// That is the single source of truth — there is no results map to maintain.
 //
 // Other commands:
-//   node scripts/bracket.js status     → print the bracket + recorded results
+//   node scripts/bracket.js status     → print the bracket + derived results
 //   node scripts/bracket.js clear      → delete the bracket
 import { readFileSync, existsSync } from "node:fs";
 import admin from "firebase-admin";
@@ -42,17 +63,9 @@ const ref = db.doc("settings/bracket");
 const args = process.argv.slice(2);
 const cmd = args[0];
 
-// Points per correct pick, by bracket size and round
-const POINTS = { 4: [4, 10], 8: [3, 6, 10], 16: [2, 4, 6, 10], 32: [1, 2, 4, 6, 10] };
-
-// football-data.org stage codes → bracket round index
-const STAGE_TO_ROUND = {
-  LAST_32:       0,
-  LAST_16:       0,  // for a 16-team bracket, R16 is round 0
-  QUARTER_FINALS: 1,
-  SEMI_FINALS:   2,
-  FINAL:         3,
-};
+// Champion-tier points by LOCK ROUND (0=R16, 1=QF, 2=SF, 3=Final).
+// Index = the round-window in which the user last set their champion pick.
+const TIER_POINTS = [20, 14, 9, 5];
 
 // Which stage is the first round for each bracket size
 const FIRST_STAGE = {
@@ -91,14 +104,14 @@ async function writeBracket(teams, roundDeadlines) {
   await ref.set({
     teams,
     rounds,
-    points: POINTS[teams.length],
+    // Champion-tier decay schedule, indexed by lock round.
+    tierPoints: TIER_POINTS.slice(0, rounds),
     deadline: admin.firestore.Timestamp.fromDate(earliestDeadline),
     deadlines: deadlinesMap,
-    results: {},
   });
   console.log(`Bracket created: ${teams.length} teams, ${rounds} rounds.`);
-  console.log(`Points per correct pick by round: ${POINTS[teams.length].join(" / ")}`);
-  console.log(`Per-round deadlines:`);
+  console.log(`Champion-tier points by lock round: ${TIER_POINTS.slice(0, rounds).join(" / ")}`);
+  console.log(`Per-round lock deadlines:`);
   for (let r = 0; r < rounds; r++) {
     console.log(`  Round ${r} locks at ${roundDeadlines[r].toISOString()}`);
   }
@@ -123,9 +136,6 @@ if (cmd === "auto") {
   const data = await res.json();
   const teamName = (t) => t.shortName || t.name;
 
-  // Determine bracket size: find the earliest knockout stage with known teams
-  // Prefer LAST_16 for a standard WC (32→16 teams). Fall back to whatever
-  // stage has populated team names.
   const knockoutStages = ["LAST_32", "LAST_16", "QUARTER_FINALS", "SEMI_FINALS"];
   let firstStageMatches = [];
   let detectedSize = null;
@@ -137,7 +147,6 @@ if (cmd === "auto") {
 
     if (stageMatches.length === 0) continue;
 
-    // Check if teams are known (not TBD/null)
     const hasTeams = stageMatches.every(
       (m) => m.homeTeam?.name && m.awayTeam?.name
         && m.homeTeam.name !== "TBD" && m.awayTeam.name !== "TBD"
@@ -161,8 +170,6 @@ if (cmd === "auto") {
     process.exit(1);
   }
 
-  // Extract teams in bracket order: home, away, home, away, …
-  // football-data.org returns matches in bracket order already.
   const teams = firstStageMatches.flatMap((m) => [
     teamName(m.homeTeam),
     teamName(m.awayTeam),
@@ -170,12 +177,9 @@ if (cmd === "auto") {
 
   console.log(`Teams (${teams.length}): ${teams.join(", ")}`);
 
-  // Build per-round deadlines: 1 hour before first match of each round.
-  // We derive this from the API's match schedule for each stage.
   const rounds = Math.log2(teams.length);
   const roundDeadlines = [];
 
-  // Map round index → API stage name (relative to detected first stage)
   const stageOrder = ["LAST_32", "LAST_16", "QUARTER_FINALS", "SEMI_FINALS", "FINAL"];
   const firstStageIdx = stageOrder.indexOf(
     knockoutStages.find((s) => firstStageMatches[0]?.stage === s) ||
@@ -194,13 +198,12 @@ if (cmd === "auto") {
       process.exit(1);
     }
 
-    // Deadline = 1 hour before the earliest kickoff in that round
+    // Deadline = 1 hour before the EARLIEST kickoff in that round
     const earliest = Math.min(...stageMs);
     roundDeadlines.push(new Date(earliest - 60 * 60 * 1000));
     console.log(`Round ${r} (${stageName}): first kickoff ${new Date(earliest).toISOString()}, deadline ${roundDeadlines[r].toISOString()}`);
   }
 
-  // Confirm before writing
   const existing = await ref.get();
   if (existing.exists) {
     console.log("\n⚠️  A bracket already exists. It will be overwritten.");
@@ -249,26 +252,6 @@ if (cmd === "auto") {
 
   await writeBracket(teams, roundDeadlines);
 
-} else if (cmd === "result") {
-  const [, matchId, ...teamParts] = args;
-  const team = teamParts.join(" ").trim();
-  if (!matchId || !team) {
-    console.error('Usage: node scripts/bracket.js result <matchId> "<Team>"');
-    process.exit(1);
-  }
-  const snap = await ref.get();
-  if (!snap.exists) {
-    console.error("No bracket exists. Run `auto` or `create` first.");
-    process.exit(1);
-  }
-  if (!snap.data().teams.includes(team)) {
-    console.error(`"${team}" is not one of the bracket teams.`);
-    process.exit(1);
-  }
-  await ref.update({ [`results.${matchId}`]: team });
-  const n = await recomputeLeaderboard(db);
-  console.log(`Recorded ${team} winning ${matchId}. Leaderboard re-ranked for ${n} players.`);
-
 } else if (cmd === "status") {
   const snap = await ref.get();
   if (!snap.exists) {
@@ -276,8 +259,10 @@ if (cmd === "auto") {
   } else {
     const b = snap.data();
     console.log(`Teams (${b.teams.length}): ${b.teams.join(", ")}`);
+    const tp = b.tierPoints || TIER_POINTS;
+    console.log(`Champion-tier points by lock round: ${tp.join(" / ")}`);
     if (b.deadlines) {
-      console.log(`Per-round deadlines:`);
+      console.log(`Per-round lock deadlines:`);
       for (let r = 0; r < b.rounds; r++) {
         const dl = b.deadlines[String(r)];
         console.log(`  Round ${r}: ${dl ? dl.toDate().toISOString() : "not set"}`);
@@ -285,13 +270,32 @@ if (cmd === "auto") {
     } else {
       console.log(`Deadline (all rounds): ${b.deadline.toDate().toISOString()}`);
     }
+
+    // Derive results + winner from finished knockout matches (source of truth).
+    const koSnap = await db
+      .collection("matches")
+      .where("phase", "==", "knockout")
+      .where("status", "==", "finished")
+      .get();
+    const derived = {};
+    for (const d of koSnap.docs) {
+      const m = d.data();
+      if (!m.bracketSlot) continue;
+      const won =
+        m.advancedTeam ||
+        (m.homeScore != null && m.awayScore != null && m.homeScore !== m.awayScore
+          ? m.homeScore > m.awayScore ? m.home : m.away
+          : null);
+      if (won) derived[m.bracketSlot] = won;
+    }
+    console.log(`Tournament winner: ${derived[`r${b.rounds - 1}-0`] || "(not yet decided)"}`);
     let matches = b.teams.length / 2;
     for (let r = 0; r < b.rounds; r++) {
       const ids = Array.from({ length: matches }, (_, i) => {
         const id = `r${r}-${i}`;
-        return `${id}${b.results[id] ? ` → ${b.results[id]}` : ""}`;
+        return `${id}${derived[id] ? ` → ${derived[id]}` : ""}`;
       });
-      console.log(`Round ${r} (+${b.points[r]} pts): ${ids.join("  ")}`);
+      console.log(`Round ${r}: ${ids.join("  ")}`);
       matches /= 2;
     }
   }
@@ -307,9 +311,11 @@ if (cmd === "auto") {
     "  auto                                            auto-create from API (recommended)\n" +
     "  create --deadline-r0 <ISO> … \"<t1,t2,…>\"       manual create\n" +
     "  create --deadline <ISO> \"<t1,t2,…>\"            manual create (shared deadline)\n" +
-    "  result <matchId> \"<Team>\"\n" +
-    "  status\n" +
-    "  clear"
+    "  status                                          print bracket + derived results\n" +
+    "  clear\n" +
+    "\n" +
+    "Results & winner are derived automatically from finished knockout\n" +
+    "matches synced by syncMatches.js — there is nothing to record by hand."
   );
 }
 process.exit(0);
