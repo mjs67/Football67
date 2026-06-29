@@ -15,6 +15,7 @@ import {
   where,
 } from "firebase/firestore";
 import { db } from "../firebase.js";
+import { scorePrediction } from "../poisson.js";
 import MatchRoast from "./MatchRoast.jsx";
 
 const CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -250,12 +251,13 @@ function GroupTable({ group, me, matches }) {
   );
 }
 
-function revealPoints(pred, match) {
-  if (!pred || match.status !== "finished") return null;
-  if (pred.home === match.homeScore && pred.away === match.awayScore) return 5;
-  if (Math.sign(pred.home - pred.away) === Math.sign(match.homeScore - match.awayScore))
-    return 3;
-  return 0;
+// Delegates to the single source of truth (poisson.js) so the league reveal
+// matches My Picks exactly — including stacked knockout points (exact +5,
+// result +3, advancer +2, up to 10). The old local copy here capped exact
+// calls at 5 and ignored the advance bonus. Returns null until the match is
+// finished; otherwise { total, exact, result, ... }.
+function revealScore(pred, match) {
+  return scorePrediction(pred, match);
 }
 
 function RevealedPicks({ group, members, matches }) {
@@ -317,12 +319,13 @@ function RevealedPicks({ group, members, matches }) {
             <div className="reveal-chips">
               {named.map((r) => {
                 const p = byUid?.get(r.id);
-                const pts = p ? revealPoints(p, m) : null;
+                const s = p ? revealScore(p, m) : null;
+                const pts = s ? s.total : null;
                 return (
                   <span
                     className={
                       "reveal-chip" +
-                      (pts === 5 ? " gold" : pts === 3 ? " ok" : pts === 0 ? " zero" : "")
+                      (s?.exact ? " gold" : s && s.total > 0 ? " ok" : s ? " zero" : "")
                     }
                     key={r.id}
                   >
@@ -342,11 +345,11 @@ function RevealedPicks({ group, members, matches }) {
                 score={`${m.homeScore}–${m.awayScore}`}
                 picks={named.map((r) => {
                   const p = byUid?.get(r.id);
-                  const pts = p ? revealPoints(p, m) : null;
+                  const s = p ? revealScore(p, m) : null;
                   return {
                     name: (r.nickname || r.displayName || "Anon").split(" ")[0],
                     prediction: p ? `${p.home}–${p.away}` : "—",
-                    pts,
+                    pts: s ? s.total : null,
                   };
                 })}
               />
