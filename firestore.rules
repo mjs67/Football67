@@ -132,6 +132,21 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Champion pick: one team to win the whole tournament (+30, paid once after
+    // the Final by recompute.js). Owner-only; the team must be one of the
+    // published qualifiers and the pick locks at the first knockout kickoff.
+    match /championPicks/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.uid == uid
+        && request.resource.data.team is string
+        && get(/databases/$(database)/documents/settings/champion).data.teams
+             .hasAny([request.resource.data.team])
+        && get(/databases/$(database)/documents/settings/champion).data.lockAt > request.time;
+      allow delete: if false;
+    }
+
     // Reminder bookkeeping: script-only
     match /reminders/{id} {
       allow read, write: if false;

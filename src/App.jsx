@@ -19,10 +19,12 @@ import MatchCard from "./components/MatchCard.jsx";
 import Leaderboard from "./components/Leaderboard.jsx";
 import MyPicks from "./components/MyPicks.jsx";
 import Groups from "./components/Groups.jsx";
+import ChampionPick from "./components/ChampionPick.jsx";
 
 const TABS = [
   { id: "fixtures", label: "Fixtures" },
   { id: "picks", label: "My Picks" },
+  { id: "champion", label: "Champion" },
   { id: "groups", label: "Leagues" },
   { id: "table", label: "Leaderboard" },
 ];
@@ -325,6 +327,8 @@ export default function App() {
         )}
 
         {tab === "groups" && <Groups user={user} matches={matches} onRequireSignIn={handleSignIn} />}
+
+        {tab === "champion" && <ChampionPick user={user} onRequireSignIn={handleSignIn} />}
 
         {tab === "table" && <Leaderboard me={user} />}
       </main>
