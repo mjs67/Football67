@@ -3,17 +3,14 @@
 // else (win/draw/win %, most likely score, probability of any scoreline)
 // is derived here from those two numbers.
 //
-// Scoring (scorePrediction / advancedSide / predictedAdvanceSide / phaseOf)
-// now lives in ./scoring.js — a framework-free module shared with the Node
-// scripts — and is re-exported here so existing `from "../poisson.js"`
-// imports keep working unchanged.
+// Scoring (scorePrediction / phaseOf) now lives in ./scoring.js — a
+// framework-free module shared with the Node scripts — and is re-exported
+// here so existing `from "../poisson.js"` imports keep working unchanged.
 const MAX_GOALS = 8;
 
 export {
   scorePrediction,
   scorePoints,
-  advancedSide,
-  predictedAdvanceSide,
   phaseOf,
 } from "./scoring.js";
 
@@ -75,17 +72,11 @@ export function pct(p) {
   return String(Math.round(n));
 }
 
-// The AI model's own prediction for a match (top scoreline + implied/most-
-// likely advancer on knockouts), scored under the same rules as the player.
-// Centralised here so My Picks and the match cards derive it the same way.
-// Returns null when the match has no odds yet.
+// The AI model's own prediction for a match (top scoreline), scored under
+// the same rules as the player. Centralised here so My Picks and the match
+// cards derive it the same way. Returns null when the match has no odds yet.
 export function aiPredictionFor(match) {
   if (!match || !match.odds) return null;
   const { top } = matchProbs(match.odds.lh, match.odds.la);
-  const pred = { home: top.h, away: top.a };
-  if (match.phase === "knockout" && top.h === top.a) {
-    pred.advance =
-      predictKnockout(match.odds.lh, match.odds.la).advancer === "H" ? "home" : "away";
-  }
-  return pred;
+  return { home: top.h, away: top.a };
 }

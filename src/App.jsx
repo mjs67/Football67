@@ -211,10 +211,6 @@ export default function App() {
             <span className="hero-pill-val">3 pts</span>
             <span className="hero-pill-label">Correct result</span>
           </div>
-          <div className="hero-pill hero-pill--ko">
-            <span className="hero-pill-val">+2 pts</span>
-            <span className="hero-pill-label">Who advances · knockouts</span>
-          </div>
         </div>
         {latestRoast ? (
           <div className="hero-roast-card hero-roast-card--live">
@@ -345,7 +341,7 @@ export default function App() {
           "@type": "WebApplication",
           "name": "Football67",
           "url": "https://www.football67.com",
-          "description": "Predict the score of every World Cup 2026 fixture before kickoff. Exact score earns 5 pts, correct result earns 3 pts, and in the knockouts a +2 bonus stacks on top for calling who goes through. Climb the leaderboard with friends.",
+          "description": "Predict the score of every World Cup 2026 fixture before kickoff. Exact score earns 5 pts, correct result earns 3 pts. Climb the leaderboard with friends.",
           "applicationCategory": "SportsApplication",
           "operatingSystem": "Web",
           "offers": {
