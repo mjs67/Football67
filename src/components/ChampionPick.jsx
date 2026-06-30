@@ -2,6 +2,30 @@ import { useEffect, useState } from "react";
 import { doc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
 import { db } from "../firebase.js";
 
+function pad(n) {
+  return String(n).padStart(2, "0");
+}
+
+// Live countdown to a target timestamp. Returns null once the target has
+// passed (caller falls back to its own "locked" UI at that point).
+function useCountdown(targetMs) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!targetMs) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [targetMs]);
+  if (!targetMs) return null;
+  const diff = targetMs - now;
+  if (diff <= 0) return null;
+  return {
+    d: Math.floor(diff / 86400000),
+    h: Math.floor((diff % 86400000) / 3600000),
+    m: Math.floor((diff % 3600000) / 60000),
+    s: Math.floor((diff % 60000) / 1000),
+  };
+}
+
 // "Pick the tournament winner" page. One team, locked at the first knockout
 // kickoff, +30 once the Final is played. The settings/champion doc (written by
 // scripts/championPick.js) drives every state below; the actual award lives in
@@ -35,6 +59,9 @@ export default function ChampionPick({ user, onRequireSignIn }) {
     });
   }, [user]);
 
+  const lockMs = settings?.lockAt?.toMillis ? settings.lockAt.toMillis() : 0;
+  const countdown = useCountdown(lockMs);
+
   if (!user) {
     return (
       <p className="empty">
@@ -63,7 +90,6 @@ export default function ChampionPick({ user, onRequireSignIn }) {
     );
   }
 
-  const lockMs = settings.lockAt?.toMillis ? settings.lockAt.toMillis() : 0;
   const locked = lockMs > 0 && Date.now() >= lockMs;
   const winner = settings.winner || null;
   const teams = settings.teams || [];
@@ -71,6 +97,7 @@ export default function ChampionPick({ user, onRequireSignIn }) {
   const lockLabel = settings.lockAt?.toDate
     ? settings.lockAt.toDate().toLocaleString(undefined, {
         weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+        timeZoneName: "short",
       })
     : "";
 
@@ -149,6 +176,28 @@ export default function ChampionPick({ user, onRequireSignIn }) {
         One team, one shot. <b className="accent-text">+30</b> if they win it all.
         {lockLabel ? ` Locks ${lockLabel}.` : ""}
       </p>
+
+      {countdown && (
+        <div className="champ-countdown">
+          <span className="champ-countdown-label">Picks lock in</span>
+          <div className="champ-countdown-clock">
+            {countdown.d > 0 && (
+              <span className="champ-countdown-unit">
+                <b>{countdown.d}</b>d
+              </span>
+            )}
+            <span className="champ-countdown-unit">
+              <b>{pad(countdown.h)}</b>h
+            </span>
+            <span className="champ-countdown-unit">
+              <b>{pad(countdown.m)}</b>m
+            </span>
+            <span className="champ-countdown-unit">
+              <b>{pad(countdown.s)}</b>s
+            </span>
+          </div>
+        </div>
+      )}
 
       <div className="champ-grid">
         {teams.map((team) => (

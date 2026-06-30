@@ -922,6 +922,43 @@ html, body { overflow-x: hidden; }
 }
 
 /* ── Champion pick: team selection grid ─────────────────────────────── */
+.champ-countdown {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 14px 0;
+  padding: 12px 16px;
+  border: 1px solid color-mix(in srgb, var(--volt) 35%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--volt) 8%, var(--pitch-deep));
+  flex-wrap: wrap;
+}
+.champ-countdown-label {
+  font-family: var(--display);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--chalk-60);
+}
+.champ-countdown-clock {
+  display: flex;
+  gap: 10px;
+}
+.champ-countdown-unit {
+  font-family: var(--numeral);
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  color: var(--chalk-60);
+}
+.champ-countdown-unit b {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--volt);
+  margin-right: 2px;
+}
+
 .champ-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
