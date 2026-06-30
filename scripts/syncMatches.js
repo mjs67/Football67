@@ -352,19 +352,8 @@ if (finishedThisSync.length > 0) {
       .where("matchId", "==", matchId)
       .get();
     const preds = predsSnap.docs.map((d) => d.data());
-    // Hand the roast scorer the knockout context (phase + who advanced) so a
-    // perfect knockout call is roasted/credited as the full stacked total
-    // (up to 10), matching the leaderboard. knockoutFields/advancingTeam are
-    // recomputed here from the same raw match used in the upsert above.
-    const ko = knockoutFields(m);
-    const koMatch = {
-      home,
-      away,
-      phase: ko.phase,
-      advancedTeam: ko.bracketSlot ? advancingTeam(m) : null,
-    };
-    await generateRoastsForLeagues(db, roastCtx, matchId, matchName, finalScore, preds, {}, koMatch);
-    await generateGlobalRoast(db, roastCtx, matchId, matchName, finalScore, preds, {}, koMatch);
+    await generateRoastsForLeagues(db, roastCtx, matchId, matchName, finalScore, preds, {});
+    await generateGlobalRoast(db, roastCtx, matchId, matchName, finalScore, preds, {});
   }
 }
 

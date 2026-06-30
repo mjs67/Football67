@@ -215,7 +215,6 @@ function StatsRow({ matches, predictions }) {
   let points = 0,
     exact = 0,
     results = 0,
-    advances = 0,
     made = 0;
   matches.forEach((m) => {
     const p = predictions[m.id];
@@ -226,14 +225,12 @@ function StatsRow({ matches, predictions }) {
     points += s.total;
     if (s.exact) exact++;
     else if (s.result) results++;
-    if (s.advanceHit) advances++;
   });
   return (
     <div className="stats-row">
       <Stat label="Points" value={points} accent />
       <Stat label="Exact scores" value={exact} />
       <Stat label="Right results" value={results} />
-      <Stat label="Advance hits" value={advances} />
       <Stat label="Picks made" value={made} />
     </div>
   );
@@ -423,7 +420,6 @@ function History({ matches, predictions }) {
               </span>
               <span className="pick-called">
                 {p.home}–{p.away}
-                {s?.advanceHit && <i className="adv-tag" title="Called who advanced (+2)">▲</i>}
                 {p.autoPicked && <i className="auto-tag" title="Auto-pick">A</i>}
               </span>
               <span className="pick-actual">

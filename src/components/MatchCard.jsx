@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 import { db } from "../firebase.js";
-import { matchProbs, pct, predictKnockout, scoreP, scorePrediction, predictedAdvanceSide } from "../poisson.js";
+import { matchProbs, pct, predictKnockout, scoreP, scorePrediction } from "../poisson.js";
 import { Flag } from "./PlayerIdentity.jsx";
 
 function pad(n) {
@@ -27,13 +27,9 @@ export default function MatchCard({ match, user, prediction, onRequireSignIn }) 
   const kickoffMs = match.kickoff?.toMillis ? match.kickoff.toMillis() : 0;
   const countdown = useCountdown(kickoffMs);
   const locked = match.status === "finished" || !countdown;
-  const isKnockout = match.phase === "knockout";
 
   const [home, setHome] = useState(prediction ? prediction.home : 0);
   const [away, setAway] = useState(prediction ? prediction.away : 0);
-  // Knockout "who goes through" pick — "home" | "away". Only stored/scored on
-  // a level prediction; a decisive score implies its own winner.
-  const [advance, setAdvance] = useState(prediction?.advance ?? null);
   const [saving, setSaving] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
 
@@ -42,51 +38,20 @@ export default function MatchCard({ match, user, prediction, onRequireSignIn }) 
     if (prediction) {
       setHome(prediction.home);
       setAway(prediction.away);
-      setAdvance(prediction.advance ?? null);
     }
-  }, [prediction?.home, prediction?.away, prediction?.advance]);
-
-  const isLevel = home === away;
-  const showAdvance = isKnockout && isLevel && match.status !== "finished" && !locked;
-
-  // Default the advancer to the model's call, so a saved level scoreline always
-  // carries a pick (the side shows pre-selected, matching the card); the player
-  // can flip it. Cleared whenever the predicted score isn't level.
-  const aiAdvance =
-    isKnockout && match.odds
-      ? predictKnockout(match.odds.lh, match.odds.la).advancer === "H"
-        ? "home"
-        : "away"
-      : null;
-  const effectiveAdvance = isLevel ? advance ?? aiAdvance : null;
+  }, [prediction?.home, prediction?.away]);
 
   const dirty =
-    !prediction ||
-    prediction.home !== home ||
-    prediction.away !== away ||
-    (isLevel && (prediction.advance ?? null) !== (effectiveAdvance ?? null));
+    !prediction || prediction.home !== home || prediction.away !== away;
 
   const score = scorePrediction(prediction, match);
 
-  // Human-readable verdict for a finished match (group: single tag; knockout:
-  // stacked breakdown of whichever of the three components landed).
+  // Human-readable verdict for a finished match.
   const verdict = (() => {
     if (match.status !== "finished" || !prediction || !score) return null;
-    const advSide = isKnockout ? predictedAdvanceSide(prediction) : null;
-    const advTeam = advSide === "home" ? match.home : advSide === "away" ? match.away : null;
-    const called =
-      `You called ${prediction.home}–${prediction.away}` +
-      (advTeam ? ` · ${advTeam} to go through` : "");
-    if (!isKnockout) {
-      const tag = score.exact ? "Exact score +5" : score.result ? "Right result +3" : "No points";
-      return { cls: score.exact ? "v5" : score.result ? "v3" : "v0", text: `${called} · ${tag}` };
-    }
-    if (score.total === 0) return { cls: "v0", text: `${called} · No points` };
-    const parts = [];
-    if (score.exact) parts.push("exact +5");
-    if (score.result) parts.push("result +3");
-    if (score.advanceHit) parts.push("advance +2");
-    return { cls: score.exact ? "v5" : "v3", text: `${called} · +${score.total} (${parts.join(" · ")})` };
+    const called = `You called ${prediction.home}–${prediction.away}`;
+    const tag = score.exact ? "Exact score +5" : score.result ? "Right result +3" : "No points";
+    return { cls: score.exact ? "v5" : score.result ? "v3" : "v0", text: `${called} · ${tag}` };
   })();
 
   async function save() {
@@ -98,8 +63,6 @@ export default function MatchCard({ match, user, prediction, onRequireSignIn }) 
         matchId: match.id,
         home,
         away,
-        // Knockout shootout pick; null on group games and decisive scorelines.
-        advance: isLevel ? effectiveAdvance : null,
         displayName: user.displayName || "Anonymous",
         photoURL: user.photoURL || "",
         updatedAt: serverTimestamp(),
@@ -177,38 +140,6 @@ export default function MatchCard({ match, user, prediction, onRequireSignIn }) 
         <OddsStrip odds={match.odds} home={home} away={away} locked={locked} match={match} />
       )}
 
-      {showAdvance && (
-        <div className="ko-advance">
-          <div className="ko-advance-head">
-            <span>Level after extra time — who goes through?</span>
-            <b className="ko-bonus-chip">+2</b>
-          </div>
-          <div className="ko-advance-options">
-            <button
-              type="button"
-              className={"ko-team-btn" + (effectiveAdvance === "home" ? " on" : "")}
-              aria-pressed={effectiveAdvance === "home"}
-              onClick={() => setAdvance("home")}
-            >
-              <KoTeam name={match.home} flag={match.homeFlag} />
-              {effectiveAdvance === "home" && <span className="ko-check" aria-hidden="true">✓</span>}
-            </button>
-            <button
-              type="button"
-              className={"ko-team-btn" + (effectiveAdvance === "away" ? " on" : "")}
-              aria-pressed={effectiveAdvance === "away"}
-              onClick={() => setAdvance("away")}
-            >
-              <KoTeam name={match.away} flag={match.awayFlag} />
-              {effectiveAdvance === "away" && <span className="ko-check" aria-hidden="true">✓</span>}
-            </button>
-          </div>
-          <p className="ko-advance-note">
-            Shootouts are near coin-flips, so this is worth less than reading the 90 minutes.
-          </p>
-        </div>
-      )}
-
       {(match.homeForm || match.awayForm || match.h2h) && match.status !== "finished" && (
         <div className="form-row">
           <FormPips form={match.homeForm} align="left" />
@@ -235,9 +166,6 @@ export default function MatchCard({ match, user, prediction, onRequireSignIn }) 
             Predictions closed
             {prediction
               ? ` · you called ${prediction.home}–${prediction.away}` +
-                (isKnockout && prediction.advance
-                  ? ` (${prediction.advance === "home" ? match.home : match.away} through)`
-                  : "") +
                 (prediction.autoPicked ? " (auto-pick)" : "")
               : ""}
           </span>
@@ -260,13 +188,6 @@ export default function MatchCard({ match, user, prediction, onRequireSignIn }) 
         )}
       </div>
 
-      {isKnockout && (
-        <p className="ko-score-legend">
-          Knockout scoring stacks — <b>+5</b> exact score, <b>+3</b> correct result,
-          and <b>+2</b> for calling who goes through (90 mins, extra time, or
-          penalties). A perfect call is worth <b>10</b> pts.
-        </p>
-      )}
     </article>
   );
 }
@@ -320,15 +241,6 @@ function FormPips({ form, align }) {
           </i>
         ))
       )}
-    </span>
-  );
-}
-
-function KoTeam({ name, flag }) {
-  return (
-    <span className="ko-team">
-      <Flag flag={flag} imgClass="ko-crest" emojiClass="ko-flag" />
-      <span className="ko-tname">{name}</span>
     </span>
   );
 }

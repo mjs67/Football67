@@ -1,7 +1,6 @@
-// Shared leaderboard recompute. Group games: exact 5 OR result 3.
-// Knockout games: exact +5, result +3, and who-advances +2 all STACK
-// (up to 10), with the advance bonus paid whenever the predicted advancer
-// matches the side that actually went through (90 mins, ET, or penalties).
+// Shared leaderboard recompute. All matches (group and knockout) score the
+// same way: exact 5 OR result 3. The old +2 "who-advances" knockout bonus
+// has been removed.
 //
 // The scoring rules now live in ../src/scoring.js — a framework-free module
 // shared with the browser app — so there is no longer a hand-copied mirror
@@ -46,7 +45,7 @@ export async function recomputeLeaderboard(db) {
   });
 
   for (const p of preds.docs) {
-    const { uid, matchId, home, away, advance, displayName, photoURL } = p.data();
+    const { uid, matchId, home, away, displayName, photoURL } = p.data();
     const m = results.get(matchId);
     const t = totals.get(uid) || blankRow();
     if (m) {
@@ -58,15 +57,12 @@ export async function recomputeLeaderboard(db) {
       const countKey = phase === "group" ? "groupPredictionsCount" : "knockoutPredictionsCount";
       t[countKey] += 1;
 
-      // Normalise phase onto the match so scorePrediction's knockout-stacking
-      // path matches the leaderboard's phase buckets (phaseOf can infer phase
-      // for older matches that predate the `phase` field).
-      const s = scorePrediction({ home, away, advance }, { ...m, phase });
+      const s = scorePrediction({ home, away }, { ...m, phase });
       if (s) {
         t.points += s.total;
         t[pointsKey] += s.total;
         // Counts stay descriptive: an exact is tallied as exact; a non-exact
-        // correct result as a result. Points already reflect the stacking.
+        // correct result as a result.
         if (s.exact) {
           t.exact += 1;
           t[exactKey] += 1;

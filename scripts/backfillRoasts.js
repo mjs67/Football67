@@ -56,13 +56,10 @@ try {
     }
     const matchName = `${m.home} v ${m.away}`;
     const finalScore = `${m.homeScore}-${m.awayScore}`;
-    // The finished match doc already carries phase + advancedTeam (stamped by
-    // syncMatches.js), so knockout roasts score with the full stacking rules.
-    const koMatch = { home: m.home, away: m.away, phase: m.phase, advancedTeam: m.advancedTeam };
     const predsSnap = await db.collection("predictions").where("matchId", "==", matchDoc.id).get();
     const preds = predsSnap.docs.map((d) => d.data());
-    await generateRoastsForLeagues(db, roastCtx, matchDoc.id, matchName, finalScore, preds, { force: FORCE }, koMatch);
-    await generateGlobalRoast(db, roastCtx, matchDoc.id, matchName, finalScore, preds, { force: FORCE }, koMatch);
+    await generateRoastsForLeagues(db, roastCtx, matchDoc.id, matchName, finalScore, preds, { force: FORCE });
+    await generateGlobalRoast(db, roastCtx, matchDoc.id, matchName, finalScore, preds, { force: FORCE });
     processed++;
   }
 

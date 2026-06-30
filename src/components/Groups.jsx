@@ -306,9 +306,8 @@ function RevealedPicks({ group, members, matches }) {
               {named.map((r) => {
                 const p = byUid?.get(r.id);
                 // Delegates to the single source of truth (poisson.js →
-                // scoring.js) so the league reveal matches My Picks exactly,
-                // including stacked knockout points (exact +5, result +3,
-                // advancer +2, up to 10).
+                // scoring.js) so the league reveal matches My Picks exactly
+                // (exact +5, result +3 — same for group and knockout).
                 const s = p ? scorePrediction(p, m) : null;
                 const pts = s ? s.total : null;
                 return (

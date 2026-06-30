@@ -4,38 +4,24 @@
 // Firestore regardless of how old it is). Keeping this in one place means
 // the two can never drift out of sync on targeting logic.
 //
-// Scoring note: roasts now score through the SAME canonical scorer as the
-// leaderboard and the app (../src/scoring.js), so knockout points stack
-// correctly (exact +5, result +3, advancer +2, up to 10). Previously this
-// file carried its own simplified 5/3/0 scorer with no knockout awareness,
-// which could mis-target a knockout roast and understate "+{pts}". Callers
-// pass the finished match (phase + advancedTeam) so the knockout path can
-// run; when omitted, scoring falls back to group rules (old behaviour).
+// Scoring note: roasts score through the SAME canonical scorer as the
+// leaderboard and the app (../src/scoring.js): exact +5, result +3, the
+// same for group and knockout matches.
 //
 // Read efficiency: buildRoastContext() fetches the leagues list and the
 // full users collection ONCE per script run, not once per match.
 import { generateRoast } from "./roastTemplates.js";
-import { scorePoints, phaseOf } from "../src/scoring.js";
+import { scorePoints } from "../src/scoring.js";
 import { displayNameOf } from "../src/nameUtils.js";
 import { compareStandings } from "../src/standings.js";
 
 const nameOf = (r) => displayNameOf(r, "Unknown");
 
-// Score a prediction for roast purposes against the finished match. `match`
-// carries phase/advancedTeam/home/away so knockout stacking applies; when
-// null we score under group rules (safe fallback to the old behaviour).
+// Score a prediction for roast purposes against the finished match.
 function pointsFor(pred, finalScore, match) {
   const [homeScore, awayScore] = finalScore.split("-").map(Number);
-  const m = {
-    status: "finished",
-    homeScore,
-    awayScore,
-    home: match?.home,
-    away: match?.away,
-    advancedTeam: match?.advancedTeam ?? null,
-    phase: match ? match.phase ?? phaseOf(match) : "group",
-  };
-  return scorePoints({ home: pred.home, away: pred.away, advance: pred.advance }, m);
+  const m = { status: "finished", homeScore, awayScore };
+  return scorePoints({ home: pred.home, away: pred.away }, m);
 }
 
 // Call once per script run (sync or backfill), before looping over matches.
