@@ -47,17 +47,10 @@
 // Other commands:
 //   node scripts/bracket.js status     → print the bracket + derived results
 //   node scripts/bracket.js clear      → delete the bracket
-import { readFileSync, existsSync } from "node:fs";
-import admin from "firebase-admin";
+import { db, admin } from "./admin.js";
 import { recomputeLeaderboard } from "./recompute.js";
+import { KO_STAGE_ORDER, FIRST_STAGE, teamName } from "./stages.js";
 
-if (existsSync("./serviceAccount.json")) {
-  const sa = JSON.parse(readFileSync("./serviceAccount.json", "utf8"));
-  admin.initializeApp({ credential: admin.credential.cert(sa) });
-} else {
-  admin.initializeApp();
-}
-const db = admin.firestore();
 const ref = db.doc("settings/bracket");
 
 const args = process.argv.slice(2);
@@ -66,14 +59,6 @@ const cmd = args[0];
 // Champion-tier points by LOCK ROUND (0=R16, 1=QF, 2=SF, 3=Final).
 // Index = the round-window in which the user last set their champion pick.
 const TIER_POINTS = [20, 14, 9, 5];
-
-// Which stage is the first round for each bracket size
-const FIRST_STAGE = {
-  32: "LAST_32",
-  16: "LAST_16",
-  8:  "QUARTER_FINALS",
-  4:  "SEMI_FINALS",
-};
 
 // Parse --flag value from args, returning the value string or null
 function getFlag(flag) {
@@ -134,9 +119,8 @@ if (cmd === "auto") {
     process.exit(1);
   }
   const data = await res.json();
-  const teamName = (t) => t.shortName || t.name;
 
-  const knockoutStages = ["LAST_32", "LAST_16", "QUARTER_FINALS", "SEMI_FINALS"];
+  const knockoutStages = KO_STAGE_ORDER.slice(0, 4); // LAST_32 … SEMI_FINALS
   let firstStageMatches = [];
   let detectedSize = null;
 
@@ -180,10 +164,10 @@ if (cmd === "auto") {
   const rounds = Math.log2(teams.length);
   const roundDeadlines = [];
 
-  const stageOrder = ["LAST_32", "LAST_16", "QUARTER_FINALS", "SEMI_FINALS", "FINAL"];
+  const stageOrder = KO_STAGE_ORDER;
   const firstStageIdx = stageOrder.indexOf(
     knockoutStages.find((s) => firstStageMatches[0]?.stage === s) ||
-    (detectedSize === 16 ? "LAST_16" : "QUARTER_FINALS")
+    FIRST_STAGE[detectedSize]
   );
 
   for (let r = 0; r < rounds; r++) {

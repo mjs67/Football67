@@ -4,12 +4,7 @@
 //      → Service accounts → Generate new private key → save as serviceAccount.json
 //      in the project root (it is gitignored).
 //   2. npm run seed
-import { readFileSync } from "node:fs";
-import admin from "firebase-admin";
-
-const serviceAccount = JSON.parse(readFileSync("./serviceAccount.json", "utf8"));
-admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
-const db = admin.firestore();
+import { db, admin } from "./admin.js";
 
 const hours = (n) => new Date(Date.now() + n * 3600 * 1000);
 

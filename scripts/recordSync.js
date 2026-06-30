@@ -4,24 +4,8 @@
 // "model last updated X minutes ago" and for debugging missed runs.
 //
 // Usage: node scripts/recordSync.js
-import { readFileSync, existsSync } from "node:fs";
-import admin from "firebase-admin";
+import { db, admin } from "./admin.js";
 
-// Explicit credential path takes priority (set by the GitHub Action via
-// GOOGLE_APPLICATION_CREDENTIALS). Falls back to ./serviceAccount.json
-// for local manual runs, then to ADC as a last resort.
-const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-if (credPath && existsSync(credPath)) {
-  const sa = JSON.parse(readFileSync(credPath, "utf8"));
-  admin.initializeApp({ credential: admin.credential.cert(sa) });
-} else if (existsSync("./serviceAccount.json")) {
-  const sa = JSON.parse(readFileSync("./serviceAccount.json", "utf8"));
-  admin.initializeApp({ credential: admin.credential.cert(sa) });
-} else {
-  admin.initializeApp();
-}
-
-const db = admin.firestore();
 const now = new Date();
 
 await db.doc("settings/syncStatus").set({

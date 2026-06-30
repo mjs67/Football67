@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { collection, limit, onSnapshot, orderBy, query } from "firebase/firestore";
 import { db } from "../firebase.js";
-
-const nameOf = (r) => r.nickname || r.displayName || "Anonymous";
+import { displayNameOf } from "../nameUtils.js";
+import { compareStandings } from "../standings.js";
+import { Avatar } from "./PlayerIdentity.jsx";
 
 // Maps each scope to the field names that back it. "overall" is the
 // existing all-time table (unchanged); "group" and "knockout" read the
@@ -40,20 +41,10 @@ export default function Leaderboard({ me }) {
       (snap) => {
         const r = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         // Ties broken by: tiebreaker distance (closest guess) → exact scores
-        // for the active scope → alphanumeric on name. The alphanumeric
-        // step is what was missing originally — without it, players tied on
-        // every stat fell back to Firestore's arbitrary document order
-        // instead of a stable, predictable one.
-        r.sort(
-          (a, b) =>
-            (b[f.points] ?? 0) - (a[f.points] ?? 0) ||
-            (a.tbDistance ?? Infinity) - (b.tbDistance ?? Infinity) ||
-            (b[f.exact] ?? 0) - (a[f.exact] ?? 0) ||
-            nameOf(a).localeCompare(nameOf(b), undefined, {
-              numeric: true,
-              sensitivity: "base",
-            })
-        );
+        // for the active scope → alphanumeric on name (shared comparator in
+        // standings.js, so the Groups table and roast targeting can never
+        // disagree about who's ahead).
+        r.sort((a, b) => compareStandings(a, b, { pointsKey: f.points, exactKey: f.exact }));
         setRows(r);
       },
       () => setRows([])
@@ -103,12 +94,8 @@ export default function Leaderboard({ me }) {
               <li key={r.id} className={"ladder-row" + (me && r.id === me.uid ? " me" : "")}>
                 <span className="pos">{i + 1}</span>
                 <span className="who">
-                  {r.photoURL ? (
-                    <img src={r.photoURL} alt="" referrerPolicy="no-referrer" />
-                  ) : (
-                    <span className="who-fallback" aria-hidden="true" />
-                  )}
-                  {nameOf(r)}
+                  <Avatar photoURL={r.photoURL} />
+                  {displayNameOf(r)}
                 </span>
                 <span className="stat">{r[f.exact] ?? 0}</span>
                 <span className="stat">{r[f.results] ?? 0}</span>

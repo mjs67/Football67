@@ -4,13 +4,8 @@
 // inside syncMatches.js (those are never flagged `backfilled`).
 //
 // Run from the project root:  node scripts/undoBackfillAutoPicks.js
-import { readFileSync } from "node:fs";
-import admin from "firebase-admin";
+import { db } from "./admin.js";
 import { recomputeLeaderboard } from "./recompute.js";
-
-const sa = JSON.parse(readFileSync("./serviceAccount.json", "utf8"));
-admin.initializeApp({ credential: admin.credential.cert(sa) });
-const db = admin.firestore();
 
 const snap = await db.collection("predictions").where("backfilled", "==", true).get();
 console.log(`Found ${snap.size} backfilled prediction(s) to remove.`);

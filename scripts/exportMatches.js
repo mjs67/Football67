@@ -6,17 +6,8 @@
 //
 // Requires serviceAccount.json in the project root (same as syncMatches.js).
 
-import { readFileSync, existsSync, writeFileSync } from "node:fs";
-import admin from "firebase-admin";
-
-if (existsSync("./serviceAccount.json")) {
-  const sa = JSON.parse(readFileSync("./serviceAccount.json", "utf8"));
-  admin.initializeApp({ credential: admin.credential.cert(sa) });
-} else {
-  admin.initializeApp(); // uses GOOGLE_APPLICATION_CREDENTIALS
-}
-
-const db = admin.firestore();
+import { writeFileSync } from "node:fs";
+import { db } from "./admin.js";
 
 const snap = await db
   .collection("matches")

@@ -5,17 +5,8 @@
 // Env vars (use any SMTP provider — Gmail app password, Resend, Brevo, etc.):
 //   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, MAIL_FROM
 //   APP_URL   e.g. https://yourdomain.com
-import { readFileSync, existsSync } from "node:fs";
-import admin from "firebase-admin";
+import { db, admin } from "./admin.js";
 import nodemailer from "nodemailer";
-
-if (existsSync("./serviceAccount.json")) {
-  const sa = JSON.parse(readFileSync("./serviceAccount.json", "utf8"));
-  admin.initializeApp({ credential: admin.credential.cert(sa) });
-} else {
-  admin.initializeApp();
-}
-const db = admin.firestore();
 
 const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, MAIL_FROM, APP_URL } = process.env;
 if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {

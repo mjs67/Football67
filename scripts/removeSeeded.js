@@ -3,12 +3,7 @@
 // untouched. Real matches have ids starting with "fd_"; seeded ones don't.
 //
 // Run from the project root:  node scripts/removeSeeded.js
-import { readFileSync } from "node:fs";
-import admin from "firebase-admin";
-
-const sa = JSON.parse(readFileSync("./serviceAccount.json", "utf8"));
-admin.initializeApp({ credential: admin.credential.cert(sa) });
-const db = admin.firestore();
+import { db } from "./admin.js";
 
 const snap = await db.collection("matches").get();
 let removed = 0;

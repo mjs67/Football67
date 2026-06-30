@@ -9,12 +9,7 @@
 // Usage:
 //   node scripts/migrateBrackets.js
 //
-import { readFileSync } from "node:fs";
-import admin from "firebase-admin";
-
-const serviceAccount = JSON.parse(readFileSync("./serviceAccount.json", "utf8"));
-admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
-const db = admin.firestore();
+import { db, admin } from "./admin.js";
 
 // Read how many rounds exist from bracket settings so we can bucket correctly.
 const settingsSnap = await db.doc("settings/bracket").get();

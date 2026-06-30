@@ -16,6 +16,9 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { scorePrediction } from "../poisson.js";
+import { displayNameOf, firstNameOf } from "../nameUtils.js";
+import { compareStandings } from "../standings.js";
+import { Avatar } from "./PlayerIdentity.jsx";
 import MatchRoast from "./MatchRoast.jsx";
 
 const CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -173,12 +176,8 @@ function GroupTable({ group, me, matches }) {
       ids.forEach((id) => {
         if (!have.has(id)) all.push({ id, displayName: "New player", points: 0 });
       });
-      all.sort(
-        (a, b) =>
-          (b.points ?? 0) - (a.points ?? 0) ||
-          (a.tbDistance ?? Infinity) - (b.tbDistance ?? Infinity) ||
-          (b.exact ?? 0) - (a.exact ?? 0)
-      );
+      // Shared comparator (standings.js) — same chain as the Leaderboard.
+      all.sort((a, b) => compareStandings(a, b));
       if (!cancelled) setRows(all);
     }
     load();
@@ -230,12 +229,8 @@ function GroupTable({ group, me, matches }) {
             <li key={r.id} className={"ladder-row" + (r.id === me.uid ? " me" : "")}>
               <span className="pos">{i + 1}</span>
               <span className="who">
-                {r.photoURL ? (
-                  <img src={r.photoURL} alt="" referrerPolicy="no-referrer" />
-                ) : (
-                  <span className="who-fallback" aria-hidden="true" />
-                )}
-                {r.nickname || r.displayName || "Anonymous"}
+                <Avatar photoURL={r.photoURL} />
+                {displayNameOf(r)}
                 {r.id === group.ownerUid && <span className="owner-chip">C</span>}
               </span>
               <span className="stat">{r.exact ?? 0}</span>
@@ -249,15 +244,6 @@ function GroupTable({ group, me, matches }) {
       )}
     </section>
   );
-}
-
-// Delegates to the single source of truth (poisson.js) so the league reveal
-// matches My Picks exactly — including stacked knockout points (exact +5,
-// result +3, advancer +2, up to 10). The old local copy here capped exact
-// calls at 5 and ignored the advance bonus. Returns null until the match is
-// finished; otherwise { total, exact, result, ... }.
-function revealScore(pred, match) {
-  return scorePrediction(pred, match);
 }
 
 function RevealedPicks({ group, members, matches }) {
@@ -319,7 +305,11 @@ function RevealedPicks({ group, members, matches }) {
             <div className="reveal-chips">
               {named.map((r) => {
                 const p = byUid?.get(r.id);
-                const s = p ? revealScore(p, m) : null;
+                // Delegates to the single source of truth (poisson.js →
+                // scoring.js) so the league reveal matches My Picks exactly,
+                // including stacked knockout points (exact +5, result +3,
+                // advancer +2, up to 10).
+                const s = p ? scorePrediction(p, m) : null;
                 const pts = s ? s.total : null;
                 return (
                   <span
@@ -329,7 +319,7 @@ function RevealedPicks({ group, members, matches }) {
                     }
                     key={r.id}
                   >
-                    {(r.nickname || r.displayName || "Anon").split(" ")[0]}
+                    {firstNameOf(r)}
                     <b>{p ? `${p.home}–${p.away}` : "—"}</b>
                     {pts !== null && <i>+{pts}</i>}
                   </span>
@@ -345,9 +335,9 @@ function RevealedPicks({ group, members, matches }) {
                 score={`${m.homeScore}–${m.awayScore}`}
                 picks={named.map((r) => {
                   const p = byUid?.get(r.id);
-                  const s = p ? revealScore(p, m) : null;
+                  const s = p ? scorePrediction(p, m) : null;
                   return {
-                    name: (r.nickname || r.displayName || "Anon").split(" ")[0],
+                    name: firstNameOf(r),
                     prediction: p ? `${p.home}–${p.away}` : "—",
                     pts: s ? s.total : null,
                   };

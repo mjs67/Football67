@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { matchProbs, pct, predictKnockout, scoreP, scorePrediction, predictedAdvanceSide } from "../poisson.js";
+import { Flag } from "./PlayerIdentity.jsx";
 
 function pad(n) {
   return String(n).padStart(2, "0");
@@ -324,28 +325,18 @@ function FormPips({ form, align }) {
 }
 
 function KoTeam({ name, flag }) {
-  const isUrl = typeof flag === "string" && flag.startsWith("http");
   return (
     <span className="ko-team">
-      {isUrl ? (
-        <img className="ko-crest" src={flag} alt="" loading="lazy" />
-      ) : (
-        <span className="ko-flag" aria-hidden="true">{flag || "⚽"}</span>
-      )}
+      <Flag flag={flag} imgClass="ko-crest" emojiClass="ko-flag" />
       <span className="ko-tname">{name}</span>
     </span>
   );
 }
 
 function Team({ name, flag, side }) {
-  const isUrl = typeof flag === "string" && flag.startsWith("http");
   return (
     <div className={"team " + side}>
-      {isUrl ? (
-        <img className="crest" src={flag} alt="" loading="lazy" />
-      ) : (
-        <span className="flag" aria-hidden="true">{flag || "⚽"}</span>
-      )}
+      <Flag flag={flag} imgClass="crest" emojiClass="flag" />
       <span className="tname">{name}</span>
     </div>
   );

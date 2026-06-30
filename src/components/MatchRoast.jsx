@@ -2,20 +2,18 @@
 import { useEffect, useState } from "react";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
+import {
+  PALETTE as C,
+  roundRect,
+  drawWordmark,
+  drawFooter,
+  wrapText,
+  shareOrDownload,
+} from "../shareCanvas.js";
 
 // Draws a roast share card on a canvas and shares/downloads it
 async function shareRoastCard({ roast, matchLabel, score, picks }) {
   const W = 1080, H = 1080;
-  const C = {
-    night:    "#0a0a0c",
-    pitch:    "#16161c",
-    deep:     "#0e0e12",
-    chalk:    "#f4f4f0",
-    chalk60:  "rgba(244,244,240,0.6)",
-    chalk25:  "rgba(244,244,240,0.25)",
-    chalk12:  "rgba(244,244,240,0.12)",
-    volt:     "#c8ff1e",
-  };
 
   const canvas = document.createElement("canvas");
   canvas.width = W;
@@ -40,17 +38,10 @@ async function shareRoastCard({ roast, matchLabel, score, picks }) {
   // Wordmark
   ctx.textBaseline = "middle";
   ctx.textAlign = "center";
-  ctx.fillStyle = C.chalk;
-  ctx.font = "700 72px 'Saira Condensed', 'Arial Narrow', sans-serif";
-  ctx.fillText("FOOTBALL", W / 2 - 52, 80);
-  const fw = ctx.measureText("FOOTBALL").width;
-  ctx.fillStyle = C.volt;
-  ctx.font = "700 72px 'Saira', sans-serif";
-  ctx.textAlign = "left";
-  ctx.fillText("67", W / 2 - 52 + fw / 2 + 8, 80);
-  ctx.textAlign = "center";
+  drawWordmark(ctx, W / 2, 80, { size: 72, offset: 52 });
 
   // Match label + score
+  ctx.textAlign = "center";
   ctx.fillStyle = C.chalk60;
   ctx.font = "500 30px 'Barlow', sans-serif";
   ctx.fillText(matchLabel, W / 2, 148);
@@ -76,9 +67,10 @@ async function shareRoastCard({ roast, matchLabel, score, picks }) {
   ctx.fillText("🔥", boxX + 24, boxY + 46);
   ctx.fillStyle = C.chalk60;
   ctx.font = "400 28px 'Barlow', sans-serif";
-  wrapText(ctx, roast, boxX + 24, boxY + 86, boxW - 48, 40);
+  wrapText(ctx, roast, boxX + 24, boxY + 86, boxW - 48, 40, 6);
 
-  // Picks chips
+  // Picks chips. Colour tiers generalise the old literal 5/3 thresholds so
+  // stacked knockout totals (up to 10) still light up: >=5 volt, >=3 mid.
   if (picks && picks.length > 0) {
     const chipY = 630;
     ctx.fillStyle = C.chalk60;
@@ -96,19 +88,20 @@ async function shareRoastCard({ roast, matchLabel, score, picks }) {
       const row = Math.floor(i / cols);
       const cx = startX + col * (chipW + gap);
       const cy = chipY + 30 + row * (chipH + 10);
+      const tier = p.pts >= 5 ? 2 : p.pts >= 3 ? 1 : 0;
 
-      ctx.fillStyle = p.pts === 5 ? "rgba(200,255,30,0.15)"
-                    : p.pts === 3 ? "rgba(244,244,240,0.08)"
+      ctx.fillStyle = tier === 2 ? "rgba(200,255,30,0.15)"
+                    : tier === 1 ? "rgba(244,244,240,0.08)"
                     : "rgba(244,244,240,0.04)";
-      ctx.strokeStyle = p.pts === 5 ? C.volt
-                      : p.pts === 3 ? C.chalk25
+      ctx.strokeStyle = tier === 2 ? C.volt
+                      : tier === 1 ? C.chalk25
                       : "rgba(244,244,240,0.1)";
-      ctx.lineWidth = p.pts === 5 ? 1.5 : 1;
+      ctx.lineWidth = tier === 2 ? 1.5 : 1;
       roundRect(ctx, cx, cy, chipW, chipH, 10);
       ctx.fill();
       ctx.stroke();
 
-      ctx.fillStyle = p.pts === 5 ? C.volt : C.chalk60;
+      ctx.fillStyle = tier === 2 ? C.volt : C.chalk60;
       ctx.font = "600 22px 'Barlow', sans-serif";
       ctx.textAlign = "center";
       ctx.fillText(p.name, cx + chipW / 2, cy + 22);
@@ -119,58 +112,12 @@ async function shareRoastCard({ roast, matchLabel, score, picks }) {
   }
 
   // Footer
-  ctx.textAlign = "center";
-  ctx.fillStyle = C.chalk60;
-  ctx.font = "500 26px 'Barlow', sans-serif";
-  ctx.fillText("Think you can call it better?", W / 2, H - 90);
-  ctx.fillStyle = C.volt;
-  ctx.font = "700 36px 'Saira Condensed', sans-serif";
-  ctx.fillText("WWW.FOOTBALL67.COM", W / 2, H - 48);
+  drawFooter(ctx, W / 2, H, { promptSize: 26, urlSize: 36 });
 
-  const blob = await new Promise((res) => canvas.toBlob(res, "image/png"));
-  const file = new File([blob], "football67-roast.png", { type: "image/png" });
-
-  if (navigator.canShare?.({ files: [file] })) {
-    try {
-      await navigator.share({ files: [file], title: "Football67 Roast", text: roast + "\n\nwww.football67.com" });
-      return;
-    } catch (e) {
-      if (e.name === "AbortError") return;
-    }
-  }
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "football67-roast.png";
-  a.click();
-  URL.revokeObjectURL(a.href);
-}
-
-function roundRect(ctx, x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-}
-
-function wrapText(ctx, text, x, y, maxW, lineH) {
-  const words = text.split(" ");
-  let line = "";
-  let cy = y;
-  for (const word of words) {
-    const test = line ? line + " " + word : word;
-    if (ctx.measureText(test).width > maxW && line) {
-      ctx.fillText(line, x, cy);
-      line = word;
-      cy += lineH;
-      if (cy > y + lineH * 5) { ctx.fillText(line + "…", x, cy); return; }
-    } else {
-      line = test;
-    }
-  }
-  if (line) ctx.fillText(line, x, cy);
+  await shareOrDownload(canvas, "football67-roast.png", {
+    title: "Football67 Roast",
+    text: roast + "\n\nwww.football67.com",
+  });
 }
 
 export default function MatchRoast({ leagueId, matchId, matchStatus, matchLabel, score, picks }) {

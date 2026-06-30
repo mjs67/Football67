@@ -1,20 +1,19 @@
 // Renders a shareable 1080×1350 image of the player's picks on a canvas,
 // then shares it via the Web Share API (falls back to a PNG download).
-import { pct, scoreP } from "./poisson.js";
+// Canvas plumbing (palette, wordmark, footer, rounded rects, share/download)
+// is shared with the roast card via ./shareCanvas.js.
+import { pct, scoreP, scorePrediction } from "./poisson.js";
+import {
+  PALETTE as C,
+  roundRect,
+  drawWordmark,
+  drawFooter,
+  truncate,
+  shareOrDownload,
+} from "./shareCanvas.js";
 
 const W = 1080;
 const H = 1350;
-
-const C = {
-  night: "#0a0a0c",
-  pitch: "#16161c",
-  deep: "#0e0e12",
-  chalk: "#f4f4f0",
-  chalk60: "rgba(244,244,240,0.6)",
-  chalk25: "rgba(244,244,240,0.25)",
-  chalk12: "rgba(244,244,240,0.12)",
-  volt: "#c8ff1e",
-};
 
 export async function sharePickCard({ user, matches, predictions, nickname }) {
   // Up to 7 picks: upcoming first (the "receipts"), then most recent results
@@ -47,18 +46,9 @@ export async function sharePickCard({ user, matches, predictions, nickname }) {
   ctx.stroke();
 
   // Wordmark
-  ctx.textAlign = "center";
-  ctx.fillStyle = C.chalk;
-  ctx.font = "700 84px 'Saira Condensed', 'Arial Narrow', sans-serif";
-  const brand = "FOOTBALL67";
-  ctx.fillText("FOOTBALL", W / 2 - 62, 150);
-  ctx.fillStyle = C.volt;
-  ctx.font = "700 84px 'Saira', sans-serif";
-  const fw = ctx.measureText("FOOTBALL").width;
-  ctx.textAlign = "left";
-  ctx.fillText("67", W / 2 - 62 + fw / 2 + 10, 150);
-  ctx.textAlign = "center";
+  drawWordmark(ctx, W / 2, 150, { size: 84, offset: 62 });
 
+  ctx.textAlign = "center";
   ctx.fillStyle = C.chalk60;
   ctx.font = "500 30px 'Barlow', sans-serif";
   ctx.fillText(`${nickname || user.displayName || "My"} picks — calling it before the whistle`, W / 2, 210);
@@ -87,9 +77,9 @@ export async function sharePickCard({ user, matches, predictions, nickname }) {
     ctx.fillStyle = C.chalk;
     ctx.font = "600 34px 'Saira Condensed', sans-serif";
     ctx.textAlign = "right";
-    ctx.fillText(trunc(ctx, m.home, 290), W / 2 - 130, cy);
+    ctx.fillText(truncate(ctx, m.home, 290), W / 2 - 130, cy);
     ctx.textAlign = "left";
-    ctx.fillText(trunc(ctx, m.away, 290), W / 2 + 130, cy);
+    ctx.fillText(truncate(ctx, m.away, 290), W / 2 + 130, cy);
 
     // Scoreboard well + volt digits
     ctx.fillStyle = C.deep;
@@ -107,9 +97,10 @@ export async function sharePickCard({ user, matches, predictions, nickname }) {
     ctx.font = "600 22px 'Barlow', sans-serif";
     ctx.textAlign = "right";
     if (m.status === "finished") {
-      const exact = p.home === m.homeScore && p.away === m.awayScore;
-      const result =
-        Math.sign(p.home - p.away) === Math.sign(m.homeScore - m.awayScore);
+      // Same scorer as the rest of the app (knockout-aware booleans).
+      const s = scorePrediction(p, m);
+      const exact = !!s?.exact;
+      const result = !!s?.result;
       ctx.fillStyle = exact ? C.volt : result ? C.chalk60 : C.chalk25;
       ctx.fillText(
         exact ? "EXACT +5" : result ? "RESULT +3" : `FT ${m.homeScore}–${m.awayScore}`,
@@ -128,50 +119,10 @@ export async function sharePickCard({ user, matches, predictions, nickname }) {
   });
 
   // Footer
-  ctx.textAlign = "center";
-  ctx.fillStyle = C.chalk60;
-  ctx.font = "600 30px 'Barlow', sans-serif";
-  ctx.fillText("Think you can call it better?", W / 2, H - 110);
-  ctx.fillStyle = C.volt;
-  ctx.font = "700 40px 'Saira Condensed', sans-serif";
-  ctx.fillText("WWW.FOOTBALL67.COM", W / 2, H - 58);
+  drawFooter(ctx, W / 2, H, { promptSize: 30, urlSize: 40 });
 
-  const blob = await new Promise((res) => canvas.toBlob(res, "image/png"));
-  const file = new File([blob], "football67-picks.png", { type: "image/png" });
-
-  if (navigator.canShare?.({ files: [file] })) {
-    try {
-      await navigator.share({
-        files: [file],
-        title: "My Football67 picks",
-        text: "Calling it before the whistle — beat me at www.football67.com",
-      });
-      return;
-    } catch (e) {
-      if (e.name === "AbortError") return; // user closed the share sheet
-    }
-  }
-  // Fallback: download the PNG
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "football67-picks.png";
-  a.click();
-  URL.revokeObjectURL(a.href);
-}
-
-function roundRect(ctx, x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-}
-
-function trunc(ctx, text, maxW) {
-  if (ctx.measureText(text).width <= maxW) return text;
-  let t = text;
-  while (t.length > 2 && ctx.measureText(t + "…").width > maxW) t = t.slice(0, -1);
-  return t + "…";
+  await shareOrDownload(canvas, "football67-picks.png", {
+    title: "My Football67 picks",
+    text: "Calling it before the whistle — beat me at www.football67.com",
+  });
 }

@@ -9,19 +9,12 @@
 //                         "EC" Euros, "PD" La Liga, "BL1" Bundesliga, "SA" Serie A
 //   DAYS_AHEAD            how far ahead to import fixtures (default 14)
 //   GOOGLE_APPLICATION_CREDENTIALS or ./serviceAccount.json for Firestore admin
-import { readFileSync, existsSync } from "node:fs";
-import admin from "firebase-admin";
+import { readFileSync } from "node:fs";
+import { db, admin } from "./admin.js";
 import { recomputeLeaderboard } from "./recompute.js";
 import { buildRoastContext, generateRoastsForLeagues, generateGlobalRoast } from "./roastGeneration.js";
 import { venueFromSchedule } from "./wc2026Venues.js";
-
-if (existsSync("./serviceAccount.json")) {
-  const sa = JSON.parse(readFileSync("./serviceAccount.json", "utf8"));
-  admin.initializeApp({ credential: admin.credential.cert(sa) });
-} else {
-  admin.initializeApp(); // uses GOOGLE_APPLICATION_CREDENTIALS
-}
-const db = admin.firestore();
+import { KO_STAGE_ORDER, STAGE_NAMES, teamName, stageLabel } from "./stages.js";
 
 const TOKEN = process.env.FOOTBALL_DATA_TOKEN;
 if (!TOKEN) {
@@ -69,7 +62,6 @@ console.log(`Fetched ${data.matches.length} season matches for ${COMP}.`);
 const allSeasonMatches = data.matches.slice();
 
 // ── Pre-match stats: last-5 form per team + head-to-head this season ──
-const teamName = (t) => t.shortName || t.name;
 const finishedSeason = data.matches
   .filter((m) => m.status === "FINISHED")
   .sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate));
@@ -187,20 +179,8 @@ data.matches = data.matches.filter((m) => {
 });
 console.log(`${data.matches.length} matches inside the ${DAYS_AHEAD}-day window.`);
 
-// Human label for where a match sits in the competition
-const STAGE_NAMES = {
-  LAST_32: "Round of 32",
-  LAST_16: "Round of 16",
-  QUARTER_FINALS: "Quarter-finals",
-  SEMI_FINALS: "Semi-finals",
-  THIRD_PLACE: "Third place",
-  FINAL: "Final",
-};
-function stageLabel(m) {
-  if (m.group) return m.group.replace("GROUP_", "Group ");
-  if (STAGE_NAMES[m.stage]) return STAGE_NAMES[m.stage];
-  return "";
-}
+// Human label for where a match sits in the competition comes from
+// stages.js (stageLabel/STAGE_NAMES), shared with scripts/bracket.js.
 
 // ── Machine-readable knockout tagging ──
 // The bracket derives team eliminations straight from the `matches`
@@ -213,7 +193,7 @@ function stageLabel(m) {
 // Round index is RELATIVE to the bracket's first knockout stage (mirrors
 // scripts/bracket.js `auto`): LAST_16 is round 0 for a 16-team bracket but
 // round 1 for a 32-team bracket.
-const KO_STAGE_ORDER = ["LAST_32", "LAST_16", "QUARTER_FINALS", "SEMI_FINALS", "FINAL"];
+// (KO_STAGE_ORDER lives in stages.js, shared with scripts/bracket.js.)
 const koStagesPresent = KO_STAGE_ORDER.filter((s) =>
   allSeasonMatches.some((m) => m.stage === s)
 );
@@ -252,8 +232,8 @@ function knockoutFields(m) {
 // drawn-but-decided knockout (e.g. a penalty shootout).
 function advancingTeam(m) {
   if (m.status !== "FINISHED") return null;
-  const home = m.homeTeam.shortName || m.homeTeam.name;
-  const away = m.awayTeam.shortName || m.awayTeam.name;
+  const home = teamName(m.homeTeam);
+  const away = teamName(m.awayTeam);
   const w = m.score?.winner;
   if (w === "HOME_TEAM") return home;
   if (w === "AWAY_TEAM") return away;
@@ -278,8 +258,8 @@ function venueLabel(m) {
   const raw =
     m.venue ||
     venueFromSchedule(
-      m.homeTeam.shortName || m.homeTeam.name,
-      m.awayTeam.shortName || m.awayTeam.name,
+      teamName(m.homeTeam),
+      teamName(m.awayTeam),
       m.utcDate
     );
   if (!raw) return null;
@@ -303,13 +283,15 @@ for (const m of data.matches) {
 
   const ref = db.collection("matches").doc(`fd_${m.id}`);
   const ko = knockoutFields(m);
+  const home = teamName(m.homeTeam);
+  const away = teamName(m.awayTeam);
   batch.set(
     ref,
     {
       source: "football-data.org",
       externalId: m.id,
-      home: m.homeTeam.shortName || m.homeTeam.name,
-      away: m.awayTeam.shortName || m.awayTeam.name,
+      home,
+      away,
       homeFlag: m.homeTeam.crest || "⚽",
       awayFlag: m.awayTeam.crest || "⚽",
       competition: stageLabel(m) ? `${compName} · ${stageLabel(m)}` : compName,
@@ -327,13 +309,10 @@ for (const m of data.matches) {
       live,
       homeScore: finished ? m.score.fullTime.home : null,
       awayScore: finished ? m.score.fullTime.away : null,
-      homeForm: lastFive(m.homeTeam.shortName || m.homeTeam.name),
-      awayForm: lastFive(m.awayTeam.shortName || m.awayTeam.name),
-      h2h: h2h(m.homeTeam.shortName || m.homeTeam.name, m.awayTeam.shortName || m.awayTeam.name),
-      odds: expectedGoals(
-        m.homeTeam.shortName || m.homeTeam.name,
-        m.awayTeam.shortName || m.awayTeam.name
-      ),
+      homeForm: lastFive(home),
+      awayForm: lastFive(away),
+      h2h: h2h(home, away),
+      odds: expectedGoals(home, away),
     },
     { merge: true }
   );
@@ -364,15 +343,28 @@ if (finishedThisSync.length > 0) {
   const roastCtx = await buildRoastContext(db);
   for (const m of finishedThisSync) {
     const matchId = `fd_${m.id}`;
-    const matchName = `${m.homeTeam.shortName || m.homeTeam.name} v ${m.awayTeam.shortName || m.awayTeam.name}`;
+    const home = teamName(m.homeTeam);
+    const away = teamName(m.awayTeam);
+    const matchName = `${home} v ${away}`;
     const finalScore = `${m.score.fullTime.home}-${m.score.fullTime.away}`;
     const predsSnap = await db
       .collection("predictions")
       .where("matchId", "==", matchId)
       .get();
     const preds = predsSnap.docs.map((d) => d.data());
-    await generateRoastsForLeagues(db, roastCtx, matchId, matchName, finalScore, preds);
-    await generateGlobalRoast(db, roastCtx, matchId, matchName, finalScore, preds);
+    // Hand the roast scorer the knockout context (phase + who advanced) so a
+    // perfect knockout call is roasted/credited as the full stacked total
+    // (up to 10), matching the leaderboard. knockoutFields/advancingTeam are
+    // recomputed here from the same raw match used in the upsert above.
+    const ko = knockoutFields(m);
+    const koMatch = {
+      home,
+      away,
+      phase: ko.phase,
+      advancedTeam: ko.bracketSlot ? advancingTeam(m) : null,
+    };
+    await generateRoastsForLeagues(db, roastCtx, matchId, matchName, finalScore, preds, {}, koMatch);
+    await generateGlobalRoast(db, roastCtx, matchId, matchName, finalScore, preds, {}, koMatch);
   }
 }
 

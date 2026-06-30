@@ -3,17 +3,9 @@
 //   node scripts/tiebreaker.js set "Total goals scored across all fixtures?"
 //   node scripts/tiebreaker.js answer 87
 //   node scripts/tiebreaker.js clear
-import { readFileSync, existsSync } from "node:fs";
-import admin from "firebase-admin";
+import { db } from "./admin.js";
 import { recomputeLeaderboard } from "./recompute.js";
 
-if (existsSync("./serviceAccount.json")) {
-  const sa = JSON.parse(readFileSync("./serviceAccount.json", "utf8"));
-  admin.initializeApp({ credential: admin.credential.cert(sa) });
-} else {
-  admin.initializeApp();
-}
-const db = admin.firestore();
 const ref = db.doc("settings/tiebreaker");
 
 const [, , cmd, ...rest] = process.argv;

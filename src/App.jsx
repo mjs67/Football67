@@ -14,6 +14,7 @@ import {
 } from "firebase/firestore";
 import { auth, db, googleProvider } from "./firebase.js";
 import { scorePrediction } from "./poisson.js";
+import { displayNameOf } from "./nameUtils.js";
 import MatchCard from "./components/MatchCard.jsx";
 import Leaderboard from "./components/Leaderboard.jsx";
 import MyPicks from "./components/MyPicks.jsx";
@@ -91,11 +92,7 @@ export default function App() {
       }
       const data = snap.docs[0].data();
       const pts = data.points || 0;
-      setLeaderTop(
-        pts > 0
-          ? { name: data.nickname || data.displayName || "Anonymous", points: pts }
-          : null
-      );
+      setLeaderTop(pts > 0 ? { name: displayNameOf(data), points: pts } : null);
     });
   }, []);
 

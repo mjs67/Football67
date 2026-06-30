@@ -7,20 +7,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { sharePickCard } from "../shareCard.js";
-import { matchProbs, predictKnockout, scorePrediction } from "../poisson.js";
-
-// AI's own prediction for a match (top scoreline + implied/most-likely
-// advancer on knockouts), scored under the same rules as the player.
-function aiPrediction(match) {
-  if (!match.odds) return null;
-  const { top } = matchProbs(match.odds.lh, match.odds.la);
-  const pred = { home: top.h, away: top.a };
-  if (match.phase === "knockout" && top.h === top.a) {
-    pred.advance =
-      predictKnockout(match.odds.lh, match.odds.la).advancer === "H" ? "home" : "away";
-  }
-  return pred;
-}
+import { scorePrediction, aiPredictionFor } from "../poisson.js";
 
 export default function MyPicks({ user, matches, predictions, onRequireSignIn }) {
   if (!user) {
@@ -96,7 +83,7 @@ function FormGraph({ matches, predictions }) {
 
   const userScores = settled.map((m) => scorePrediction(predictions[m.id], m));
   const aiScores = settled.map((m) => {
-    const ai = aiPrediction(m);
+    const ai = aiPredictionFor(m);
     return ai ? scorePrediction(ai, m) : null;
   });
   const userRows = userScores.map((s) => s?.total ?? 0);

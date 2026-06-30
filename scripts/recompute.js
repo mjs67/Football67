@@ -3,71 +3,24 @@
 // (up to 10), with the advance bonus paid whenever the predicted advancer
 // matches the side that actually went through (90 mins, ET, or penalties).
 //
-// The scoring helpers below are an exact mirror of src/poisson.js
-// (scorePrediction / advancedSide / predictedAdvanceSide). They're inlined
-// here on purpose: this script runs under plain Node in CI and must not reach
-// across into the Vite `src/` tree. If you change the rules, change BOTH.
+// The scoring rules now live in ../src/scoring.js — a framework-free module
+// shared with the browser app — so there is no longer a hand-copied mirror
+// here to keep in sync. (scoring.js imports nothing from Firebase or the DOM,
+// so it loads fine under plain Node in CI.)
 //
 // Also computes tiebreaker distance once settings/tiebreaker.answer is set.
 // Stage Tables: alongside the all-time totals (points/exact/results), also
 // buckets the same numbers by tournament phase (groupPoints/knockoutPoints
 // etc.) so the leaderboard can offer a Group Stage and Knockout view that
 // resets at the tournament's natural checkpoints, without touching the
-// all-time table. Falls back to inferring phase from the competition label
-// for any match that predates the `phase` field being added to
-// syncMatches.js (matches outside its rolling sync window never get
-// backfilled with new fields — see backfillRoasts.js for the same issue
-// with roasts).
+// all-time table. phaseOf() (also from scoring.js) falls back to inferring
+// phase from the competition label for any match that predates the `phase`
+// field being added to syncMatches.js.
 //
 // predictionsCount: every SETTLED prediction (the match has finished),
 // whether or not it scored — the denominator for the leaderboard's
 // points-per-prediction column.
-function phaseOf(m) {
-  if (m.phase === "group" || m.phase === "knockout") return m.phase;
-  return m.competition && m.competition.includes("Group") ? "group" : "knockout";
-}
-
-// ── Scoring (mirror of src/poisson.js — keep in sync) ───────────────
-function advancedSide(match) {
-  if (!match || match.phase !== "knockout") return null;
-  if (match.advancedTeam && match.advancedTeam === match.home) return "home";
-  if (match.advancedTeam && match.advancedTeam === match.away) return "away";
-  if (
-    match.status === "finished" &&
-    match.homeScore != null &&
-    match.awayScore != null &&
-    match.homeScore !== match.awayScore
-  ) {
-    return match.homeScore > match.awayScore ? "home" : "away";
-  }
-  return null;
-}
-
-function predictedAdvanceSide(pred) {
-  if (!pred) return null;
-  if (pred.home > pred.away) return "home";
-  if (pred.away > pred.home) return "away";
-  return pred.advance ?? null;
-}
-
-function scorePrediction(pred, match) {
-  if (!pred || !match || match.status !== "finished") return null;
-  const exact = pred.home === match.homeScore && pred.away === match.awayScore;
-  const result =
-    Math.sign(pred.home - pred.away) === Math.sign(match.homeScore - match.awayScore);
-
-  if (match.phase !== "knockout") {
-    const base = exact ? 5 : result ? 3 : 0;
-    return { base, bonus: 0, total: base, exact, result, advanceHit: false, knockout: false };
-  }
-
-  const base = (exact ? 5 : 0) + (result ? 3 : 0);
-  const actual = advancedSide(match);
-  const mine = predictedAdvanceSide(pred);
-  const advanceHit = !!actual && !!mine && actual === mine;
-  const bonus = advanceHit ? 2 : 0;
-  return { base, bonus, total: base + bonus, exact, result, advanceHit, knockout: true };
-}
+import { scorePrediction, phaseOf } from "../src/scoring.js";
 
 export async function recomputeLeaderboard(db) {
   const finished = await db.collection("matches").where("status", "==", "finished").get();

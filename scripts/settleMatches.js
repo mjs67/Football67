@@ -5,14 +5,9 @@
 //   node scripts/settleMatches.js --recount → just recompute all user points
 //
 // Scoring: exact score = 5 pts, correct result (W/D/L) = 3 pts, else 0.
-import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
-import admin from "firebase-admin";
+import { db } from "./admin.js";
 import { recomputeLeaderboard } from "./recompute.js";
-
-const serviceAccount = JSON.parse(readFileSync("./serviceAccount.json", "utf8"));
-admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
-const db = admin.firestore();
 
 const recountOnly = process.argv.includes("--recount");
 
