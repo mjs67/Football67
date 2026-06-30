@@ -48,6 +48,10 @@ jobs:
           DAYS_AHEAD: "45"
         run: node scripts/syncMatches.js
 
+      - name: Refresh champion pick teams (no-op once locked or decided)
+        if: success()
+        run: node scripts/championPick.js refresh
+
       - name: Record sync heartbeat
         if: success()
         env:

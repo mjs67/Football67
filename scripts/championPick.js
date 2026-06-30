@@ -8,6 +8,7 @@
 // Usage:
 //   node scripts/championPick.js open            (defaults to LAST_16)
 //   node scripts/championPick.js open LAST_32    (or QUARTER_FINALS, …)
+//   node scripts/championPick.js refresh         (safe for scheduled automation — see below)
 //   node scripts/championPick.js winner Brazil
 //   node scripts/championPick.js winner --auto   (reads the Final's advancedTeam)
 //   node scripts/championPick.js status
@@ -85,6 +86,61 @@ if (cmd === "open") {
   if (looksUnresolved(teams)) {
     console.log("  ⚠ Some entries look like unresolved placeholders — re-run once the group stage is final.");
   }
+} else if (cmd === "refresh") {
+  // Idempotent, automation-safe version of `open`. Meant to run unattended on
+  // every scheduled sync (alongside syncMatches.js) so the team grid grows as
+  // more Round of 16 matchups get confirmed, WITHOUT any of the footguns a
+  // blind `open` would have on a timer:
+  //   - never clobbers a published winner (would silently erase the +30)
+  //   - never touches anything once picks are already locked
+  //   - never re-writes Firestore when nothing has actually changed
+  // First run with nothing open yet behaves just like `open LAST_16`.
+  const snap = await ref.get();
+  const existing = snap.exists ? snap.data() : null;
+
+  if (existing?.winner) {
+    console.log("Champion already decided — refresh skipped.");
+    process.exit(0);
+  }
+
+  const existingLockMs = existing?.lockAt?.toMillis ? existing.lockAt.toMillis() : 0;
+  if (existingLockMs && Date.now() >= existingLockMs) {
+    console.log("Picks already locked — refresh skipped.");
+    process.exit(0);
+  }
+
+  const stage = existing?.stage || "LAST_16";
+  const label = STAGE_NAMES[stage];
+  const stageMatches = matchesForLabel(await allMatches(), label);
+  if (stageMatches.length === 0) {
+    console.log(`No "${label}" matches yet — nothing to refresh.`);
+    process.exit(0);
+  }
+
+  const { teams, flags, lockMillis } = collectQualifiers(stageMatches);
+  if (!lockMillis) {
+    console.log(`"${label}" matches have no kickoff times yet — nothing to refresh.`);
+    process.exit(0);
+  }
+
+  if (existing && existing.teams?.length === teams.length) {
+    console.log(`No new teams (${teams.length}/${stageMatches.length * 2} known) — refresh skipped.`);
+    process.exit(0);
+  }
+
+  await ref.set({
+    stage,
+    stageLabel: label,
+    teams,
+    flags,
+    lockAt: admin.firestore.Timestamp.fromMillis(lockMillis),
+    winner: null,
+  });
+
+  console.log(`Champion pick refreshed for ${label}: ${teams.length}/${stageMatches.length * 2} teams known.`);
+  if (looksUnresolved(teams)) {
+    console.log("  ⚠ Some entries look like unresolved placeholders.");
+  }
 } else if (cmd === "winner") {
   const snap = await ref.get();
   if (!snap.exists) {
@@ -134,6 +190,6 @@ if (cmd === "open") {
   const n = await recomputeLeaderboard(db);
   console.log(`Champion pick cleared. Leaderboard recomputed for ${n} players (bonus removed).`);
 } else {
-  console.log("Commands: open [STAGE] | winner <Team>|--auto | status | clear");
+  console.log("Commands: open [STAGE] | refresh | winner <Team>|--auto | status | clear");
 }
 process.exit(0);
