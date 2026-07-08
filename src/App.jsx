@@ -194,6 +194,10 @@ export default function App() {
           ))}
       </header>
 
+      <div className="site-banner">
+        🏆 Predict the champion before the final and get 67 points — one time only.
+      </div>
+
       <section className="hero">
         <p className="hero-eyebrow">Matchday is open</p>
         <h1>

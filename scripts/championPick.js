@@ -11,6 +11,7 @@
 //   node scripts/championPick.js refresh         (safe for scheduled automation — see below)
 //   node scripts/championPick.js winner Brazil
 //   node scripts/championPick.js winner --auto   (reads the Final's advancedTeam)
+//   node scripts/championPick.js setlock <ISO-8601 datetime>  (manual override, e.g. for the Final kickoff)
 //   node scripts/championPick.js status
 //   node scripts/championPick.js clear
 import { db, admin } from "./admin.js";
@@ -128,16 +129,22 @@ if (cmd === "open") {
     process.exit(0);
   }
 
+  const lockManual = !!existing?.lockManual;
+
   await ref.set({
     stage,
     stageLabel: label,
     teams,
     flags,
-    lockAt: admin.firestore.Timestamp.fromMillis(lockMillis),
+    lockAt: lockManual ? existing.lockAt : admin.firestore.Timestamp.fromMillis(lockMillis),
+    lockManual,
     winner: null,
   });
 
   console.log(`Champion pick refreshed for ${label}: ${teams.length}/${stageMatches.length * 2} teams known.`);
+  if (lockManual) {
+    console.log("  Lock time is manually pinned (setlock) — left untouched.");
+  }
   if (looksUnresolved(teams)) {
     console.log("  ⚠ Some entries look like unresolved placeholders.");
   }
@@ -171,6 +178,32 @@ if (cmd === "open") {
   await ref.set({ winner: team }, { merge: true });
   const n = await recomputeLeaderboard(db);
   console.log(`Champion set to "${team}". +30 applied; leaderboard recomputed for ${n} players.`);
+} else if (cmd === "setlock") {
+  // Manual override: pin the countdown to an exact instant regardless of any
+  // match's kickoff time. Useful when the close time is a fixed calendar
+  // moment (e.g. the Final) rather than derived from `open`/`refresh`.
+  const snap = await ref.get();
+  if (!snap.exists) {
+    console.error('Champion pick has not been opened. Run "open" first.');
+    process.exit(1);
+  }
+  const raw = rest.join(" ").trim();
+  if (!raw) {
+    console.error("Usage: node scripts/championPick.js setlock <ISO-8601 datetime>");
+    console.error('Example: node scripts/championPick.js setlock "2026-07-19T15:00:00-04:00"');
+    process.exit(1);
+  }
+  const ms = Date.parse(raw);
+  if (Number.isNaN(ms)) {
+    console.error(`Could not parse "${raw}" as a date/time. Use an ISO-8601 string with a timezone offset.`);
+    process.exit(1);
+  }
+  if (ms <= Date.now()) {
+    console.log("  ⚠ That time is in the past — picks will lock immediately.");
+  }
+  await ref.set({ lockAt: admin.firestore.Timestamp.fromMillis(ms), lockManual: true }, { merge: true });
+  console.log(`Champion pick lock set to ${new Date(ms).toISOString()} (${new Date(ms).toString()}).`);
+  console.log("This lock time is now pinned — scheduled `refresh` runs will not override it.");
 } else if (cmd === "status") {
   const snap = await ref.get();
   if (!snap.exists) {
@@ -180,7 +213,7 @@ if (cmd === "open") {
     const picks = await db.collection("championPicks").get();
     const lock = d.lockAt?.toDate ? d.lockAt.toDate().toISOString() : d.lockAt;
     console.log(`Stage:  ${d.stageLabel} (${(d.teams || []).length} teams)`);
-    console.log(`Locks:  ${lock}`);
+    console.log(`Locks:  ${lock}${d.lockManual ? " (manually pinned)" : ""}`);
     console.log(`Winner: ${d.winner || "(not set)"}`);
     console.log(`Picks:  ${picks.size} submitted`);
   }
@@ -190,6 +223,6 @@ if (cmd === "open") {
   const n = await recomputeLeaderboard(db);
   console.log(`Champion pick cleared. Leaderboard recomputed for ${n} players (bonus removed).`);
 } else {
-  console.log("Commands: open [STAGE] | refresh | winner <Team>|--auto | status | clear");
+  console.log("Commands: open [STAGE] | refresh | winner <Team>|--auto | setlock <ISO-datetime> | status | clear");
 }
 process.exit(0);
