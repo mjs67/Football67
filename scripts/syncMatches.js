@@ -286,37 +286,45 @@ for (const m of data.matches) {
   const ko = knockoutFields(m);
   const home = teamName(m.homeTeam);
   const away = teamName(m.awayTeam);
-  batch.set(
-    ref,
-    {
-      source: "football-data.org",
-      externalId: m.id,
-      home,
-      away,
-      homeFlag: m.homeTeam.crest || "⚽",
-      awayFlag: m.awayTeam.crest || "⚽",
-      competition: stageLabel(m) ? `${compName} · ${stageLabel(m)}` : compName,
-      // Machine-readable phase/bracket tags — drive leaderboard phase buckets
-      // (recompute.js phaseOf) and the bracket's elimination detection.
-      phase: ko.phase,
-      round: ko.round,
-      bracketSlot: ko.bracketSlot,
-      // For knockout slots: the team that advanced (handles ET/penalties,
-      // where the full-time score is level). Null for group/undecided.
-      advancedTeam: ko.bracketSlot ? advancingTeam(m) : null,
-      venue: venueLabel(m),
-      kickoff: admin.firestore.Timestamp.fromDate(new Date(m.utcDate)),
-      status: finished ? "finished" : "upcoming",
-      live,
-      homeScore: finished ? m.score.fullTime.home : null,
-      awayScore: finished ? m.score.fullTime.away : null,
-      homeForm: lastFive(home),
-      awayForm: lastFive(away),
-      h2h: h2h(home, away),
-      odds: expectedGoals(home, away),
-    },
-    { merge: true }
-  );
+  const fields = {
+    source: "football-data.org",
+    externalId: m.id,
+    home,
+    away,
+    homeFlag: m.homeTeam.crest || "⚽",
+    awayFlag: m.awayTeam.crest || "⚽",
+    competition: stageLabel(m) ? `${compName} · ${stageLabel(m)}` : compName,
+    // Machine-readable phase/bracket tags — drive leaderboard phase buckets
+    // (recompute.js phaseOf) and the bracket's elimination detection.
+    phase: ko.phase,
+    round: ko.round,
+    bracketSlot: ko.bracketSlot,
+    // For knockout slots: the team that advanced (handles ET/penalties,
+    // where the full-time score is level). Null for group/undecided.
+    advancedTeam: ko.bracketSlot ? advancingTeam(m) : null,
+    venue: venueLabel(m),
+    kickoff: admin.firestore.Timestamp.fromDate(new Date(m.utcDate)),
+    status: finished ? "finished" : "upcoming",
+    live,
+    homeScore: finished ? m.score.fullTime.home : null,
+    awayScore: finished ? m.score.fullTime.away : null,
+  };
+  // Freeze the model's pre-match numbers the moment a match finishes. Every
+  // sync re-derives `odds`/form/h2h from `finishedSeason`, which — once this
+  // match itself (or any other) has finished — includes results that hadn't
+  // happened yet at kickoff. Left unguarded, that means the "AI model" call
+  // shown on a finished match, and any auto-pick derived from it, keeps
+  // drifting toward hindsight the longer the match sits finished, instead of
+  // staying the honest pre-kickoff prediction. `merge: true` + simply
+  // omitting these keys once `finished` is true means Firestore leaves
+  // whatever was last written while the match was still "upcoming" alone.
+  if (!finished) {
+    fields.homeForm = lastFive(home);
+    fields.awayForm = lastFive(away);
+    fields.h2h = h2h(home, away);
+    fields.odds = expectedGoals(home, away);
+  }
+  batch.set(ref, fields, { merge: true });
   if (++writes % 400 === 0) {
     await batch.commit();
     batch = db.batch();
@@ -384,12 +392,14 @@ if (missingRatings.size > 0) {
 // (poisson.js predictKnockout, off the match's stored odds) so a forgotten
 // pick still has a real shot at the 3-pt result bonus.
 function autoPickScoreFor(m) {
-  if (m.phase !== "knockout" || !m.odds) return { home: 1, away: 1 };
+  if (m.phase !== "knockout" || !m.odds) return { home: 1, away: 1, method: "default" };
   const ko = predictKnockout(m.odds.lh, m.odds.la);
-  if (ko.decided === "regulation") return { home: ko.h, away: ko.a };
+  if (ko.decided === "regulation") return { home: ko.h, away: ko.a, method: "model" };
   // Model's most-likely scoreline was level (shootout territory) — nudge
   // the predicted advancer up a goal so the auto-pick is a decisive result.
-  return ko.advancer === "H" ? { home: ko.h + 1, away: ko.a } : { home: ko.h, away: ko.a + 1 };
+  return ko.advancer === "H"
+    ? { home: ko.h + 1, away: ko.a, method: "model" }
+    : { home: ko.h, away: ko.a + 1, method: "model" };
 }
 
 const soonSnap = await db
@@ -404,13 +414,14 @@ if (!soonSnap.empty) {
     for (const m of soonSnap.docs) {
       const ref = db.doc(`predictions/${u.id}_${m.id}`);
       if ((await ref.get()).exists) continue;
-      const { home, away } = autoPickScoreFor(m.data());
+      const { home, away, method } = autoPickScoreFor(m.data());
       await ref.set({
         uid: u.id,
         matchId: m.id,
         home,
         away,
         autoPicked: true,
+        autoPickMethod: method,
         displayName: u.data().displayName || "Anonymous",
         photoURL: u.data().photoURL || "",
         updatedAt: admin.firestore.Timestamp.now(),
