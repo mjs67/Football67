@@ -367,7 +367,7 @@ function SettingsToggles({ user }) {
       eyebrow="Auto-pick safety net"
       note={
         autoPickOn
-          ? "If you forget a match, a 1–1 is lodged for you just before kickoff so you're never blanked."
+          ? "If you forget a match, a 1–1 is lodged for you for group games and AI model prediction is used for knockout games"
           : "Forget a deadline? Turn this on and a default 1–1 is lodged for you just before kickoff."
       }
       on={autoPickOn}
