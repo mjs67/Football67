@@ -1,9 +1,9 @@
-// Manage the "pick the tournament winner" bonus (+30, paid once after the Final).
+// Manage the "pick the tournament winner" bonus (+67, paid once after the Final).
 //
 // Lifecycle:
 //   1. After the group stage is final and the first knockout round's teams are
 //      known, open the pick. Picks lock at that round's first kickoff.
-//   2. After the Final, publish the winner — this awards +30 and recomputes.
+//   2. After the Final, publish the winner — this awards +67 and recomputes.
 //
 // Usage:
 //   node scripts/championPick.js open            (defaults to LAST_16)
@@ -92,7 +92,7 @@ if (cmd === "open") {
   // every scheduled sync (alongside syncMatches.js) so the team grid grows as
   // more Round of 16 matchups get confirmed, WITHOUT any of the footguns a
   // blind `open` would have on a timer:
-  //   - never clobbers a published winner (would silently erase the +30)
+  //   - never clobbers a published winner (would silently erase the +67)
   //   - never touches anything once picks are already locked
   //   - never re-writes Firestore when nothing has actually changed
   // First run with nothing open yet behaves just like `open LAST_16`.
@@ -177,7 +177,7 @@ if (cmd === "open") {
 
   await ref.set({ winner: team }, { merge: true });
   const n = await recomputeLeaderboard(db);
-  console.log(`Champion set to "${team}". +30 applied; leaderboard recomputed for ${n} players.`);
+  console.log(`Champion set to "${team}". +67 applied; leaderboard recomputed for ${n} players.`);
 } else if (cmd === "setlock") {
   // Manual override: pin the countdown to an exact instant regardless of any
   // match's kickoff time. Useful when the close time is a fixed calendar
@@ -219,7 +219,7 @@ if (cmd === "open") {
   }
 } else if (cmd === "clear") {
   await ref.delete();
-  // Recompute so the +30 is dropped from anyone who had it (winner is now gone).
+  // Recompute so the +67 is dropped from anyone who had it (winner is now gone).
   const n = await recomputeLeaderboard(db);
   console.log(`Champion pick cleared. Leaderboard recomputed for ${n} players (bonus removed).`);
 } else {

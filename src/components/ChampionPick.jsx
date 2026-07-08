@@ -27,7 +27,7 @@ function useCountdown(targetMs) {
 }
 
 // "Pick the tournament winner" page. One team, locked at the first knockout
-// kickoff, +30 once the Final is played. The settings/champion doc (written by
+// kickoff, +67 once the Final is played. The settings/champion doc (written by
 // scripts/championPick.js) drives every state below; the actual award lives in
 // recompute.js, so this component only reads and records the pick.
 export default function ChampionPick({ user, onRequireSignIn }) {
@@ -84,7 +84,7 @@ export default function ChampionPick({ user, onRequireSignIn }) {
         <p className="panel-q">Pick the winner — coming soon</p>
         <p className="panel-note">
           Once the knockout teams are confirmed you'll pick one team to win it all.
-          Get it right and you bank a one-off <b className="accent-text">+30</b> after the Final.
+          Get it right and you bank a one-off <b className="accent-text">+67</b> after the Final.
         </p>
       </div>
     );
@@ -131,7 +131,7 @@ export default function ChampionPick({ user, onRequireSignIn }) {
         {mine ? (
           hit ? (
             <p className="panel-note">
-              You called it — <b className="accent-text">+30</b> banked. 🏆
+              You called it — <b className="accent-text">+67</b> banked. 🏆
             </p>
           ) : (
             <p className="panel-note">
@@ -155,7 +155,7 @@ export default function ChampionPick({ user, onRequireSignIn }) {
             <p className="panel-q">
               Your pick: <span className="accent-text">{mine.team}</span>
             </p>
-            <p className="panel-note">Picks are locked. +30 if they lift the trophy.</p>
+            <p className="panel-note">Picks are locked. +67 if they lift the trophy.</p>
           </>
         ) : (
           <>
@@ -173,7 +173,7 @@ export default function ChampionPick({ user, onRequireSignIn }) {
       <p className="panel-eyebrow">Champion · {settings.stageLabel || "Knockouts"}</p>
       <p className="panel-q">Pick your tournament winner</p>
       <p className="panel-note">
-        One team, one shot. <b className="accent-text">+30</b> if they win it all.
+        One team, one shot. <b className="accent-text">+67</b> if they win it all.
         {lockLabel ? ` Locks ${lockLabel}.` : ""}
       </p>
 

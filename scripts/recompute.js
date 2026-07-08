@@ -9,10 +9,10 @@
 //
 // Also computes tiebreaker distance once settings/tiebreaker.answer is set,
 // and the one-off Champion-pick bonus once settings/champion.winner is set
-// (+30 to whoever picked the eventual tournament winner). Both are folded in
+// (+67 to whoever picked the eventual tournament winner). Both are folded in
 // here rather than in scoring.js because they are leaderboard aggregations,
 // not per-match scoring — and because this runs from scratch every time, the
-// +30 is idempotent (no risk of stacking across repeated recomputes).
+// +67 is idempotent (no risk of stacking across repeated recomputes).
 //
 // Stage Tables: alongside the all-time totals (points/exact/results), also
 // buckets the same numbers by tournament phase (groupPoints/knockoutPoints
@@ -28,7 +28,7 @@
 import { scorePrediction, phaseOf } from "../src/scoring.js";
 
 // Points awarded once, after the Final, to anyone who picked the champion.
-export const CHAMPION_BONUS = 30;
+export const CHAMPION_BONUS = 67;
 
 export async function recomputeLeaderboard(db) {
   const finished = await db.collection("matches").where("status", "==", "finished").get();
@@ -92,8 +92,8 @@ export async function recomputeLeaderboard(db) {
 
   // Champion-pick bonus (only once the tournament winner has been published).
   // Mirrors the tiebreaker pass above: every championPicks doc gets a row,
-  // and the +30 lands only on the player(s) who named the eventual winner.
-  // championBonus is written for everyone with a pick (0 or 30) so the field
+  // and the +67 lands only on the player(s) who named the eventual winner.
+  // championBonus is written for everyone with a pick (0 or 67) so the field
   // never goes stale on a re-run after the winner changes or is cleared.
   const champSettings = await db.doc("settings/champion").get();
   const winner = champSettings.exists ? champSettings.data().winner : null;
