@@ -15,6 +15,7 @@ import { recomputeLeaderboard } from "./recompute.js";
 import { buildRoastContext, generateRoastsForLeagues, generateGlobalRoast } from "./roastGeneration.js";
 import { venueFromSchedule } from "./wc2026Venues.js";
 import { KO_STAGE_ORDER, STAGE_NAMES, teamName, stageLabel } from "./stages.js";
+import { predictKnockout } from "../src/poisson.js";
 
 const TOKEN = process.env.FOOTBALL_DATA_TOKEN;
 if (!TOKEN) {
@@ -365,17 +366,32 @@ if (missingRatings.size > 0) {
 }
 
 // ── Auto-pick safety net ──
-// Players with autoPickOn get a default 1–1 lodged for any match kicking off
-// within the next 40 minutes (or already underway but not yet settled) that
-// they haven't predicted. Deliberately has no lower bound on kickoff: GitHub
-// Actions' `schedule:` trigger has no timing SLA and a sync can also fail
-// outright (see fetchWithRetry's process.exit on persistent errors), so a
-// run can land after a match has already kicked off. Without a lower bound,
-// the *next* successful run still catches it as long as the match is still
-// "upcoming" (i.e. not yet reported FINISHED) — a lower bound here meant a
-// single missed/delayed run could permanently skip a match for autopick
-// users, since once kickoff < now they'd never satisfy "kickoff > now"
-// again on any later run.
+// Players with autoPickOn get a default prediction lodged for any match
+// kicking off within the next 40 minutes (or already underway but not yet
+// settled) that they haven't predicted. Deliberately has no lower bound on
+// kickoff: GitHub Actions' `schedule:` trigger has no timing SLA and a sync
+// can also fail outright (see fetchWithRetry's process.exit on persistent
+// errors), so a run can land after a match has already kicked off. Without a
+// lower bound, the *next* successful run still catches it as long as the
+// match is still "upcoming" (i.e. not yet reported FINISHED) — a lower
+// bound here meant a single missed/delayed run could permanently skip a
+// match for autopick users, since once kickoff < now they'd never satisfy
+// "kickoff > now" again on any later run.
+//
+// A flat 1–1 works fine for group games (they do draw), but a knockout tie
+// is built to produce a winner, so 1–1 there is close to a guaranteed zero.
+// For knockout matches we instead auto-pick the AI model's predicted winner
+// (poisson.js predictKnockout, off the match's stored odds) so a forgotten
+// pick still has a real shot at the 3-pt result bonus.
+function autoPickScoreFor(m) {
+  if (m.phase !== "knockout" || !m.odds) return { home: 1, away: 1 };
+  const ko = predictKnockout(m.odds.lh, m.odds.la);
+  if (ko.decided === "regulation") return { home: ko.h, away: ko.a };
+  // Model's most-likely scoreline was level (shootout territory) — nudge
+  // the predicted advancer up a goal so the auto-pick is a decisive result.
+  return ko.advancer === "H" ? { home: ko.h + 1, away: ko.a } : { home: ko.h, away: ko.a + 1 };
+}
+
 const soonSnap = await db
   .collection("matches")
   .where("status", "==", "upcoming")
@@ -388,11 +404,12 @@ if (!soonSnap.empty) {
     for (const m of soonSnap.docs) {
       const ref = db.doc(`predictions/${u.id}_${m.id}`);
       if ((await ref.get()).exists) continue;
+      const { home, away } = autoPickScoreFor(m.data());
       await ref.set({
         uid: u.id,
         matchId: m.id,
-        home: 1,
-        away: 1,
+        home,
+        away,
         autoPicked: true,
         displayName: u.data().displayName || "Anonymous",
         photoURL: u.data().photoURL || "",
@@ -401,7 +418,7 @@ if (!soonSnap.empty) {
       autoPicked++;
     }
   }
-  if (autoPicked) console.log(`Auto-picked 1–1 for ${autoPicked} player-matches.`);
+  if (autoPicked) console.log(`Auto-picked safety-net predictions for ${autoPicked} player-matches.`);
 }
 
 process.exit(0);
