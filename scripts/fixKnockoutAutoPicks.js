@@ -1,26 +1,28 @@
-// ONE-TIME fix for auto-picked predictions on KNOCKOUT matches that were
-// lodged with the old blanket 1–1 default (see syncMatches.js's auto-pick
-// safety net, now patched to be phase-aware going forward).
+// ONE-TIME fix for auto-picked predictions on KNOCKOUT matches.
+//
+// v2 — targets by `autoPicked: true` alone, NOT by "is the value still 1–1".
+// A prior run of an earlier version of this script (or the old blanket
+// safety net) may have already replaced the original 1–1 default with a
+// decisive score, so filtering on "== 1–1" silently skips everything that's
+// already been touched once. `autoPicked: true` is the reliable marker
+// either way — a manual save always wipes it (MatchCard's save() does a
+// non-merge setDoc), so it can never be true on a genuine player pick.
 //
 // Splits into two cases:
 //
-//   FINISHED knockout matches — their `odds` field has been recomputed and
-//   overwritten by every sync since the match ended (finishedSeason folds
-//   the match's own result, and any later results, back into the team-
-//   strength stats). That makes any "AI model" prediction derived from it
-//   hindsight-informed, not a genuine pre-match call. Rather than pass that
-//   off as a prediction, these are settled with an honest 50/50 coin flip,
-//   tagged `autoPickMethod: "coinflip"` so it's clearly not the model.
+//   FINISHED knockout matches — `odds` has been recomputed and overwritten
+//   by every sync since the match ended (finishedSeason folds the match's
+//   own result, and any later results, back into the team-strength stats).
+//   That makes any "AI model" prediction derived from it hindsight-informed,
+//   not a genuine pre-match call — including whatever was written by an
+//   earlier run of this script. These are (re-)settled with an honest 50/50
+//   coin flip, tagged `autoPickMethod: "coinflip"`. Already-coinflipped docs
+//   are left alone (idempotent — re-running won't re-roll them).
 //
-//   STILL-UPCOMING knockout matches — the match hasn't happened yet, so
-//   its stored `odds` are a clean, uncontaminated pre-match read. These use
-//   the real AI model prediction (poisson.js predictKnockout), tagged
-//   `autoPickMethod: "model"` — same as the live safety net now does.
-//
-// Only touches docs with `autoPicked: true` that still hold the literal
-// 1–1 default. Genuine manual picks are never flagged that way (MatchCard's
-// save() does a non-merge setDoc, which wipes the field entirely), so this
-// can never overwrite a real player pick.
+//   STILL-UPCOMING knockout matches — the match hasn't happened yet, so its
+//   stored `odds` are a clean, uncontaminated pre-match read. These get (or
+//   keep getting, on re-runs) the real AI model prediction (poisson.js
+//   predictKnockout), tagged `autoPickMethod: "model"`.
 //
 // Run from the project root:  node scripts/fixKnockoutAutoPicks.js
 import { db, admin } from "./admin.js";
@@ -52,42 +54,49 @@ let batch = db.batch();
 let n = 0;
 let fixedCoinflip = 0;
 let fixedModel = 0;
+let alreadyCoinflipped = 0;
 let skippedNoOdds = 0;
 
 for (const d of predsSnap.docs) {
   const p = d.data();
   const m = matches.get(p.matchId);
-  if (!m) continue; // group match — old 1–1 default is fine, leave it
-  if (p.home !== 1 || p.away !== 1) continue; // already fixed / not the old default
+  if (!m) continue; // group match — leave alone, this script is knockout-only
 
-  let score, method;
   if (m.status === "finished") {
-    score = randomDrawScore();
-    method = "coinflip";
+    if (p.autoPickMethod === "coinflip") {
+      alreadyCoinflipped++;
+      continue; // already fixed on a previous run — leave the roll as-is
+    }
+    const score = randomDrawScore();
     console.log(
-      `  - ${p.displayName || p.uid} — ${m.home} v ${m.away} (FT): 1–1 -> ${score.home}–${score.away} (coin flip)`
+      `  - ${p.displayName || p.uid} — ${m.home} v ${m.away} (FT): ${p.home}-${p.away} -> ${score.home}-${score.away} (coin flip)`
     );
+    batch.update(d.ref, {
+      home: score.home,
+      away: score.away,
+      autoPickMethod: "coinflip",
+      updatedAt: admin.firestore.Timestamp.now(),
+    });
+    fixedCoinflip++;
   } else {
-    score = modelScoreFor(m);
+    const score = modelScoreFor(m);
     if (!score) {
       skippedNoOdds++;
       console.log(`  ! skipping ${p.displayName || p.uid} — ${p.matchId} (no odds yet)`);
       continue;
     }
-    method = "model";
     console.log(
-      `  - ${p.displayName || p.uid} — ${m.home} v ${m.away} (upcoming): 1–1 -> ${score.home}–${score.away} (model)`
+      `  - ${p.displayName || p.uid} — ${m.home} v ${m.away} (upcoming): ${p.home}-${p.away} -> ${score.home}-${score.away} (model)`
     );
+    batch.update(d.ref, {
+      home: score.home,
+      away: score.away,
+      autoPickMethod: "model",
+      updatedAt: admin.firestore.Timestamp.now(),
+    });
+    fixedModel++;
   }
 
-  batch.update(d.ref, {
-    home: score.home,
-    away: score.away,
-    autoPickMethod: method,
-    updatedAt: admin.firestore.Timestamp.now(),
-  });
-  if (method === "coinflip") fixedCoinflip++;
-  else fixedModel++;
   if (++n % 400 === 0) {
     await batch.commit();
     batch = db.batch();
@@ -97,6 +106,7 @@ await batch.commit();
 
 console.log(`Fixed ${fixedCoinflip} finished knockout auto-pick(s) via coin flip.`);
 console.log(`Fixed ${fixedModel} upcoming knockout auto-pick(s) via AI model.`);
+console.log(`Already coin-flipped (left as-is): ${alreadyCoinflipped}.`);
 console.log(`Skipped ${skippedNoOdds} (no odds yet).`);
 
 console.log("Recomputing leaderboard…");

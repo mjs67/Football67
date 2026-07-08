@@ -94,6 +94,11 @@ export default function ChampionPick({ user, onRequireSignIn }) {
   const winner = settings.winner || null;
   const teams = settings.teams || [];
   const flags = settings.flags || {};
+  // Teams knocked out of the tournament (kept in sync by championPick.js
+  // `refresh`, which runs after every settle). These stay visible in the grid
+  // but can't be picked.
+  const eliminated = new Set(settings.eliminated || []);
+  const selectedOut = selected && eliminated.has(selected);
   const lockLabel = settings.lockAt?.toDate
     ? settings.lockAt.toDate().toLocaleString(undefined, {
         weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
@@ -102,7 +107,7 @@ export default function ChampionPick({ user, onRequireSignIn }) {
     : "";
 
   async function save() {
-    if (!selected || saving || locked || winner) return;
+    if (!selected || saving || locked || winner || eliminated.has(selected)) return;
     setSaving(true);
     try {
       await setDoc(doc(db, "championPicks", user.uid), {
@@ -177,6 +182,12 @@ export default function ChampionPick({ user, onRequireSignIn }) {
         {lockLabel ? ` Locks ${lockLabel}.` : ""}
       </p>
 
+      {mine && eliminated.has(mine.team) && (
+        <p className="panel-note champ-eliminated-note">
+          <b>{mine.team}</b> is out of the tournament — pick a new winner before the deadline.
+        </p>
+      )}
+
       {countdown && (
         <div className="champ-countdown">
           <span className="champ-countdown-label">Picks lock in</span>
@@ -200,28 +211,39 @@ export default function ChampionPick({ user, onRequireSignIn }) {
       )}
 
       <div className="champ-grid">
-        {teams.map((team) => (
-          <button
-            key={team}
-            className={"champ-team" + (selected === team ? " selected" : "")}
-            onClick={() => setSelected(team)}
-            aria-pressed={selected === team}
-          >
-            {flags[team] ? (
-              <img className="champ-flag" src={flags[team]} alt="" referrerPolicy="no-referrer" />
-            ) : (
-              <span className="champ-flag fallback" aria-hidden="true" />
-            )}
-            <span className="champ-name">{team}</span>
-          </button>
-        ))}
+        {teams.map((team) => {
+          const out = eliminated.has(team);
+          return (
+            <button
+              key={team}
+              className={
+                "champ-team" +
+                (selected === team ? " selected" : "") +
+                (out ? " eliminated" : "")
+              }
+              onClick={() => !out && setSelected(team)}
+              disabled={out}
+              aria-pressed={selected === team}
+              aria-disabled={out}
+              title={out ? `${team} is out of the tournament` : undefined}
+            >
+              {flags[team] ? (
+                <img className="champ-flag" src={flags[team]} alt="" referrerPolicy="no-referrer" />
+              ) : (
+                <span className="champ-flag fallback" aria-hidden="true" />
+              )}
+              <span className="champ-name">{team}</span>
+              {out && <span className="champ-out">Out</span>}
+            </button>
+          );
+        })}
       </div>
 
       <div className="tb-input-row champ-actions">
         <button
           className="btn solid"
           onClick={save}
-          disabled={saving || !selected || (mine && selected === mine.team)}
+          disabled={saving || !selected || selectedOut || (mine && selected === mine.team)}
         >
           {saving ? "Saving…" : saved ? "Saved ✓" : mine ? "Update pick" : "Lock it in"}
         </button>

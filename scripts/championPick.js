@@ -20,9 +20,17 @@ import { STAGE_NAMES } from "./stages.js";
 import {
   matchesForLabel,
   collectQualifiers,
+  collectEliminated,
   looksUnresolved,
   championFromFinals,
 } from "./championLogic.js";
+
+// Order-independent equality for two lists of team names.
+function sameTeams(a = [], b = []) {
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  return b.every((t) => set.has(t));
+}
 
 const ref = db.doc("settings/champion");
 
@@ -56,7 +64,8 @@ if (cmd === "open") {
     process.exit(1);
   }
 
-  const stageMatches = matchesForLabel(await allMatches(), label);
+  const all = await allMatches();
+  const stageMatches = matchesForLabel(all, label);
   if (stageMatches.length === 0) {
     console.error(`No "${label}" matches found yet. Has the bracket been synced?`);
     process.exit(1);
@@ -68,18 +77,22 @@ if (cmd === "open") {
     process.exit(1);
   }
 
+  const eliminated = collectEliminated(all);
+
   await ref.set({
     stage,
     stageLabel: label,
     teams,
     flags,
+    eliminated,
     lockAt: admin.firestore.Timestamp.fromMillis(lockMillis),
     winner: null,
   });
 
   console.log(
-    `Champion pick opened for ${label}: ${teams.length} teams, ` +
-      `locks ${new Date(lockMillis).toISOString()}.`
+    `Champion pick opened for ${label}: ${teams.length} teams` +
+      (eliminated.length ? ` (${eliminated.length} already out)` : "") +
+      `, locks ${new Date(lockMillis).toISOString()}.`
   );
   if (teams.length !== stageMatches.length * 2) {
     console.log(`  Note: ${teams.length} teams from ${stageMatches.length} matches (expected ${stageMatches.length * 2}).`);
@@ -112,7 +125,8 @@ if (cmd === "open") {
 
   const stage = existing?.stage || "LAST_16";
   const label = STAGE_NAMES[stage];
-  const stageMatches = matchesForLabel(await allMatches(), label);
+  const all = await allMatches();
+  const stageMatches = matchesForLabel(all, label);
   if (stageMatches.length === 0) {
     console.log(`No "${label}" matches yet — nothing to refresh.`);
     process.exit(0);
@@ -124,8 +138,20 @@ if (cmd === "open") {
     process.exit(0);
   }
 
-  if (existing && existing.teams?.length === teams.length) {
-    console.log(`No new teams (${teams.length}/${stageMatches.length * 2} known) — refresh skipped.`);
+  // Recompute the knocked-out set every run — the picker greys these out so no
+  // one can back a team that's already gone. This is why the skip check below
+  // considers eliminations too: the team COUNT stays flat across a whole
+  // knockout round (16 R16 teams, always), yet each finished match adds a
+  // loser, and that change must reach the doc.
+  const eliminated = collectEliminated(all);
+
+  const teamsUnchanged = existing && existing.teams?.length === teams.length;
+  const elimUnchanged = sameTeams(existing?.eliminated || [], eliminated);
+  if (teamsUnchanged && elimUnchanged) {
+    console.log(
+      `No change (${teams.length}/${stageMatches.length * 2} teams, ` +
+        `${eliminated.length} out) — refresh skipped.`
+    );
     process.exit(0);
   }
 
@@ -136,12 +162,16 @@ if (cmd === "open") {
     stageLabel: label,
     teams,
     flags,
+    eliminated,
     lockAt: lockManual ? existing.lockAt : admin.firestore.Timestamp.fromMillis(lockMillis),
     lockManual,
     winner: null,
   });
 
-  console.log(`Champion pick refreshed for ${label}: ${teams.length}/${stageMatches.length * 2} teams known.`);
+  console.log(
+    `Champion pick refreshed for ${label}: ${teams.length}/${stageMatches.length * 2} teams known, ` +
+      `${eliminated.length} eliminated.`
+  );
   if (lockManual) {
     console.log("  Lock time is manually pinned (setlock) — left untouched.");
   }
@@ -212,7 +242,9 @@ if (cmd === "open") {
     const d = snap.data();
     const picks = await db.collection("championPicks").get();
     const lock = d.lockAt?.toDate ? d.lockAt.toDate().toISOString() : d.lockAt;
-    console.log(`Stage:  ${d.stageLabel} (${(d.teams || []).length} teams)`);
+    const elim = d.eliminated || [];
+    console.log(`Stage:  ${d.stageLabel} (${(d.teams || []).length} teams, ${elim.length} out)`);
+    if (elim.length) console.log(`Out:    ${elim.join(", ")}`);
     console.log(`Locks:  ${lock}${d.lockManual ? " (manually pinned)" : ""}`);
     console.log(`Winner: ${d.winner || "(not set)"}`);
     console.log(`Picks:  ${picks.size} submitted`);

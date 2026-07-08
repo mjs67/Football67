@@ -40,6 +40,21 @@ export function collectQualifiers(stageMatches) {
   return { teams, flags, lockMillis };
 }
 
+// Teams knocked out of the tournament. A knockout match that has finished
+// carries `advancedTeam` (the side that progressed — set only for bracket-slot
+// matches, and correct for ET/penalties). The other participant is out. Group
+// matches never set `advancedTeam`, so they can't eliminate anyone here.
+// Returns a sorted, de-duplicated list of eliminated team names.
+export function collectEliminated(allMatches) {
+  const out = new Set();
+  for (const m of allMatches) {
+    if (m.status !== "finished" || !m.advancedTeam) continue;
+    if (m.home && m.home !== m.advancedTeam) out.add(m.home);
+    if (m.away && m.away !== m.advancedTeam) out.add(m.away);
+  }
+  return [...out].sort((a, b) => a.localeCompare(b));
+}
+
 // Heuristic: do any entries still look like unresolved bracket placeholders
 // ("Winner Group A", "Runner-up B", "1A", "W49", …)? If so the group stage
 // probably isn't final yet and `open` should be re-run later.

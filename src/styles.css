@@ -1031,3 +1031,31 @@ html, body { overflow-x: hidden; }
   line-height: 1.6;
   white-space: nowrap;
 }
+
+/* Champion pick — teams knocked out of the tournament. Rendered disabled so a
+   player can't back a side that's already gone; the set is kept current by
+   championPick.js `refresh` after every settle. */
+.champ-team.eliminated {
+  cursor: not-allowed;
+  opacity: 0.45;
+  filter: grayscale(1);
+  border-color: var(--chalk-12);
+}
+.champ-team.eliminated:hover { border-color: var(--chalk-12); }
+.champ-team.eliminated .champ-name { text-decoration: line-through; }
+.champ-out {
+  margin-left: auto;
+  flex: none;
+  font-family: var(--body);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--chalk);
+  background: var(--chalk-12);
+  border-radius: 4px;
+  padding: 2px 5px;
+}
+.champ-eliminated-note {
+  color: var(--volt);
+}
