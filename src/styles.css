@@ -512,6 +512,29 @@ body {
   width: 26px; height: 26px; border-radius: 50%; flex: none;
   background: var(--chalk-12);
 }
+/* Clickable player name: reads as plain leaderboard text until hovered,
+   rather than a default <button>. Opens the player modal on click. */
+.ladder-row .who-name {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-weight: 500;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 0.12s ease;
+}
+.ladder-row .who-name:hover,
+.ladder-row .who-name:focus-visible {
+  color: var(--volt);
+  outline: none;
+}
 .ladder-row .stat, .ladder-head .stat {
   text-align: center;
   font-family: var(--numeral);

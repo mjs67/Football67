@@ -4,6 +4,7 @@ import { db } from "../firebase.js";
 import { displayNameOf } from "../nameUtils.js";
 import { compareStandings } from "../standings.js";
 import { Avatar } from "./PlayerIdentity.jsx";
+import PlayerModal from "./PlayerModal.jsx";
 
 // Maps each scope to the field names that back it. "overall" is the
 // existing all-time table (unchanged); "group" and "knockout" read the
@@ -27,6 +28,10 @@ const SCOPES = {
 export default function Leaderboard({ me }) {
   const [scope, setScope] = useState("overall");
   const [rows, setRows] = useState(null);
+  // The player whose profile modal is open (their full leaderboard row), or
+  // null. The modal itself always resolves OVERALL rank internally, so it's
+  // safe to open from any scope.
+  const [selected, setSelected] = useState(null);
 
   useEffect(() => {
     setRows(null); // show the loading state while switching scopes
@@ -95,7 +100,14 @@ export default function Leaderboard({ me }) {
                 <span className="pos">{i + 1}</span>
                 <span className="who">
                   <Avatar photoURL={r.photoURL} />
-                  {displayNameOf(r)}
+                  <button
+                    type="button"
+                    className="who-name"
+                    onClick={() => setSelected(r)}
+                    title={`View ${displayNameOf(r)}'s points and roast`}
+                  >
+                    {displayNameOf(r)}
+                  </button>
                 </span>
                 <span className="stat">{r[f.exact] ?? 0}</span>
                 <span className="stat">{r[f.results] ?? 0}</span>
@@ -106,6 +118,8 @@ export default function Leaderboard({ me }) {
           })}
         </ol>
       )}
+
+      {selected && <PlayerModal row={selected} onClose={() => setSelected(null)} />}
     </>
   );
 }
