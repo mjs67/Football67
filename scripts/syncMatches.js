@@ -273,6 +273,20 @@ function venueLabel(m) {
 }
 const compName = (data.competition?.name || COMP).replace(/^FIFA /, "");
 
+// Snapshot which matches are still "upcoming" in Firestore BEFORE this run's
+// upsert flips any of them to "finished". A match is "newly finished" this
+// run iff it was in this set and now reports FINISHED — that's the only set
+// we roast below. Without this gate the roast loop re-roasted every finished
+// match in the window on every 30-min run (44/44 finished → 44 roast passes,
+// each a predictions query + context build), which is what exhausted the
+// Firestore daily read quota. This single query is far cheaper than that,
+// and shrinks as the tournament progresses and fewer matches remain upcoming.
+const prevUpcomingSnap = await db
+  .collection("matches")
+  .where("status", "==", "upcoming")
+  .get();
+const wasUpcoming = new Set(prevUpcomingSnap.docs.map((d) => d.id));
+
 let batch = db.batch();
 let writes = 0;
 let settled = 0;
@@ -347,7 +361,15 @@ console.log(`Leaderboard recomputed for ${playersAfterSync} players.`);
 // The global roast always targets the CURRENT overall #1 (re-checked here,
 // per finished match, against the leaderboard just recomputed above) —
 // not necessarily the same person from the last roast.
-const finishedThisSync = data.matches.filter((m) => m.status === "FINISHED");
+// Only matches that were still "upcoming" before this run and now report
+// FINISHED — i.e. the ones that finished since the last sync. Matches that
+// were already finished on a prior run are skipped, so their roasts aren't
+// regenerated every cycle. (A match imported for the very first time already
+// in the past won't be in `wasUpcoming`, so it isn't roasted — intentional:
+// it avoids roasting a backlog of historical matches when the window slides.)
+const finishedThisSync = data.matches.filter(
+  (m) => m.status === "FINISHED" && wasUpcoming.has(`fd_${m.id}`)
+);
 if (finishedThisSync.length > 0) {
   const roastCtx = await buildRoastContext(db);
   for (const m of finishedThisSync) {
