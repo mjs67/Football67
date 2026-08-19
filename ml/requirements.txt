@@ -1,0 +1,11 @@
+# Serving (kept minimal so the runtime image stays small)
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+numpy==2.2.1
+scikit-learn==1.6.1
+prometheus-fastapi-instrumentator==7.0.0
+
+# Training / experiment tracking (not needed at serve time)
+lightgbm==4.5.0
+mlflow==2.19.0

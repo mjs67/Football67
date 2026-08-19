@@ -1,0 +1,106 @@
+name: ml-retrain
+
+# Weekly (and on-demand) retrain for the BATCH setup — no cloud, no API, no
+# container in the path. The flow: export the latest results -> train + score ->
+# gate against the committed production.json -> if the new model wins, commit
+# the fresh ml/model.json + ml/production.json. That commit IS the deploy: your
+# existing sync job reads ml/model.json and serves it via scripts/mlClient.js.
+#
+# Required secret:
+#   FOOTBALL_DATA_TOKEN   football-data.org key (same one syncMatches.js uses)
+# Optional secrets:
+#   MLFLOW_TRACKING_URI   only if you want the MLflow experiment UI; the gate
+#                         does NOT need it (git is the registry).
+#   FIREBASE_SA_JSON      service-account JSON to let the monitor job read
+#                         served predictions + results from Firestore.
+on:
+  schedule:
+    - cron: "0 6 * * 1"          # Mondays 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      competitions:
+        description: "Comma-separated competition codes"
+        default: "WC"
+
+permissions:
+  contents: write                # to commit the promoted model back to the repo
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    env:
+      MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}   # optional; blank is fine
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1. Rebuild the training table (honest as-of features) from latest results.
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - name: Export training data
+        env:
+          FOOTBALL_DATA_TOKEN: ${{ secrets.FOOTBALL_DATA_TOKEN }}
+          COMPETITIONS: ${{ github.event.inputs.competitions || 'WC' }}
+        run: node scripts/exportTrainingData.js
+
+      # 2. Train, score, and gate. GLM has no heavy deps; lightgbm is an
+      #    optional benchmark (installed here so the comparison is logged).
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Train + evaluate + gate
+        working-directory: ml
+        run: |
+          pip install numpy scikit-learn lightgbm
+          [ -n "$MLFLOW_TRACKING_URI" ] && pip install mlflow || true
+          python train.py --data ../scripts/training_data.json
+      - name: Summary
+        working-directory: ml
+        run: cat last_metrics.json >> "$GITHUB_STEP_SUMMARY"
+
+      # 3. Deploy = commit the promoted model. Only runs when the gate passed.
+      - name: Commit promoted model
+        working-directory: ml
+        run: |
+          if [ "$(cat promoted.flag)" != "1" ]; then
+            echo "Model not promoted — nothing to commit."; exit 0
+          fi
+          git config user.name  "football67-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add model.json production.json
+          git commit -m "Retrain: promote model (RPS $(python -c "import json;print(round(json.load(open('production.json'))['rps'],4))"))" || {
+            echo "No changes to commit."; exit 0; }
+          git push
+
+  monitor:
+    runs-on: ubuntu-latest
+    continue-on-error: true        # monitoring is advisory, never blocks
+    env:
+      MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - name: Export served predictions + results from Firestore
+        if: ${{ secrets.FIREBASE_SA_JSON != '' }}
+        env:
+          FIREBASE_SA_JSON: ${{ secrets.FIREBASE_SA_JSON }}
+        run: |
+          echo "$FIREBASE_SA_JSON" > scripts/serviceAccount.json
+          node scripts/exportMatches.js
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Realized quality + drift
+        working-directory: ml
+        run: |
+          pip install numpy scikit-learn
+          [ -n "$MLFLOW_TRACKING_URI" ] && pip install mlflow || true
+          if [ -f ../scripts/matchesExport.json ]; then
+            python monitor.py --served ../scripts/matchesExport.json \
+              --train ../scripts/training_data.json
+          else
+            echo "No served-prediction export (Firebase secret not set) — skipping."
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: monitor-report
+          path: ml/monitor_report.json

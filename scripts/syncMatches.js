@@ -16,6 +16,7 @@ import { buildRoastContext, generateRoastsForLeagues, generateGlobalRoast } from
 import { venueFromSchedule } from "./wc2026Venues.js";
 import { KO_STAGE_ORDER, STAGE_NAMES, teamName, stageLabel } from "./stages.js";
 import { predictKnockout } from "../src/poisson.js";
+import { buildFeatures, predictGoals } from "./mlClient.js";
 
 const TOKEN = process.env.FOOTBALL_DATA_TOKEN;
 if (!TOKEN) {
@@ -336,7 +337,17 @@ for (const m of data.matches) {
     fields.homeForm = lastFive(home);
     fields.awayForm = lastFive(away);
     fields.h2h = h2h(home, away);
-    fields.odds = expectedGoals(home, away);
+    // Odds come from the trained model (scripts/mlClient.js reads ml/model.json
+    // and predicts in pure JS). If no model is committed yet, or its inputs are
+    // missing, predictGoals() returns null and we fall back to the built-in
+    // expectedGoals() blend — so the sync never breaks on a missing model.
+    const mlFeatures = buildFeatures({
+      home, away, neutral: NEUTRAL_VENUE,
+      strengthOf: strength, ratingOf,
+      homeForm: fields.homeForm, awayForm: fields.awayForm,
+      h2h: fields.h2h, gHome, gAway,
+    });
+    fields.odds = predictGoals(mlFeatures) || expectedGoals(home, away);
   }
   batch.set(ref, fields, { merge: true });
   if (++writes % 400 === 0) {
