@@ -56,7 +56,7 @@ jobs:
         run: docker build -t football67-model:ci .
       - name: Smoke test container
         run: |
-          docker run -d -p 8080:8080 --name m football67-model:ci
+          docker run -d -p 8080:8080 --name model-smoke football67-model:ci
           for i in $(seq 1 15); do
             curl -sf http://localhost:8080/health && break || sleep 2
           done
@@ -65,4 +65,4 @@ jobs:
             -H 'Content-Type: application/json' \
             -d '{"home_rating":1800,"away_rating":1500,"rating_diff":360}' \
             | grep -q '"lh"'
-          docker rm -f m
+          docker rm -f model-smoke

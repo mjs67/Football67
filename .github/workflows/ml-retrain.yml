@@ -35,7 +35,8 @@ jobs:
 
       # 1. Rebuild the training table (honest as-of features) from latest results.
       - uses: actions/setup-node@v4
-        with: { node-version: "20" }
+        with: { node-version: "20", cache: "npm" }
+      - run: npm ci
       - name: Export training data
         env:
           FOOTBALL_DATA_TOKEN: ${{ secrets.FOOTBALL_DATA_TOKEN }}
@@ -75,16 +76,18 @@ jobs:
     continue-on-error: true        # monitoring is advisory, never blocks
     env:
       MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+      # Reuses your existing automation.yml secret — nothing new to create.
+      HAS_FIREBASE: ${{ secrets.FIREBASE_SERVICE_ACCOUNT != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: "20" }
+        with: { node-version: "20", cache: "npm" }
+      - run: npm ci
       - name: Export served predictions + results from Firestore
-        if: ${{ secrets.FIREBASE_SA_JSON != '' }}
-        env:
-          FIREBASE_SA_JSON: ${{ secrets.FIREBASE_SA_JSON }}
+        if: ${{ env.HAS_FIREBASE == 'true' }}
         run: |
-          echo "$FIREBASE_SA_JSON" > scripts/serviceAccount.json
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > "${{ github.workspace }}/serviceAccount.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=${{ github.workspace }}/serviceAccount.json" >> "$GITHUB_ENV"
           node scripts/exportMatches.js
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
@@ -94,13 +97,15 @@ jobs:
           pip install numpy scikit-learn
           [ -n "$MLFLOW_TRACKING_URI" ] && pip install mlflow || true
           if [ -f ../scripts/matchesExport.json ]; then
-            python monitor.py --served ../scripts/matchesExport.json \
-              --train ../scripts/training_data.json
+            python monitor.py --served ../scripts/matchesExport.json
           else
-            echo "No served-prediction export (Firebase secret not set) — skipping."
+            echo "No served-prediction export (FIREBASE_SERVICE_ACCOUNT not set) — skipping."
           fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: monitor-report
           path: ml/monitor_report.json
+      - name: Clean up service account
+        if: always()
+        run: rm -f "${{ github.workspace }}/serviceAccount.json"
