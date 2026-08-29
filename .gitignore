@@ -1,5 +1,8 @@
-node_modules
-dist
+﻿node_modules/
+dist/
+.env.local
+.firebase/
 serviceAccount.json
-.firebase
-.env*
+serviceAccountKey.json
+scripts/serviceAccount.json
+scripts/serviceAccountKey.json

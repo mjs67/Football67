@@ -1,281 +1,466 @@
-import { useEffect, useState } from "react";
-import { doc, serverTimestamp, setDoc } from "firebase/firestore";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { doc, serverTimestamp, setDoc, writeBatch } from "firebase/firestore";
 import { db } from "../firebase.js";
-import { matchProbs, pct, predictKnockout, scoreP, scorePrediction } from "../poisson.js";
-import { Flag } from "./PlayerIdentity.jsx";
+import { matchProbs, pct, predict1x2, aiPredictionFor, scorePrediction } from "../poisson.js";
 
-function pad(n) {
-  return String(n).padStart(2, "0");
+// ── theme tokens (match the app's dark / neon-lime look) ──
+const C = {
+  accent: "#c9f24d",
+  mint: "#5ef2a8",
+  coral: "#ff6b6b",
+  text: "#f4f5ef",
+  muted: "#8f948040",
+  mutedText: "#9aa08a",
+  card: "rgba(255,255,255,0.035)",
+  border: "rgba(255,255,255,0.09)",
+  chip: "rgba(255,255,255,0.05)",
+};
+
+const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
+const toMillis = (k) =>
+  !k ? 0 : typeof k.toMillis === "function" ? k.toMillis() : k.seconds ? k.seconds * 1000 : new Date(k).getTime();
+
+function fmtCountdown(ms) {
+  if (ms <= 0) return "locked";
+  const s = Math.floor(ms / 1000);
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${sec}s`;
+  return `${sec}s`;
 }
 
-function useCountdown(targetMs) {
+// v2 §2.1 — outcome derived from a scoreline
+const outcomeOf = (h, a) => (h > a ? "1" : h === a ? "X" : "2");
+
+export default function MatchCard({ match, user, prediction, onRequireSignIn, gameweekMatches, allPredictions }) {
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
-  const diff = targetMs - now;
-  if (diff <= 0) return null;
-  const d = Math.floor(diff / 86400000);
-  const h = Math.floor((diff % 86400000) / 3600000);
-  const m = Math.floor((diff % 3600000) / 60000);
-  const s = Math.floor((diff % 60000) / 1000);
-  return d > 0 ? `${d}d ${pad(h)}h ${pad(m)}m` : `${pad(h)}:${pad(m)}:${pad(s)}`;
-}
-
-export default function MatchCard({ match, user, prediction, onRequireSignIn }) {
-  const kickoffMs = match.kickoff?.toMillis ? match.kickoff.toMillis() : 0;
-  const countdown = useCountdown(kickoffMs);
-  const locked = match.status === "finished" || !countdown;
-
-  const [home, setHome] = useState(prediction ? prediction.home : 0);
-  const [away, setAway] = useState(prediction ? prediction.away : 0);
   const [saving, setSaving] = useState(false);
-  const [savedFlash, setSavedFlash] = useState(false);
+  const savingRef = useRef(false);
 
-  // Sync local state when the stored prediction arrives/changes
+  const kickoffMs = toMillis(match.kickoff);
+  const settled = match.status === "finished";
+  const locked = !settled && now >= kickoffMs;
+  const open = !settled && !locked;
+
+  // Live countdown — only tick while the card is still open.
   useEffect(() => {
-    if (prediction) {
-      setHome(prediction.home);
-      setAway(prediction.away);
-    }
-  }, [prediction?.home, prediction?.away]);
+    if (!open) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [open]);
 
-  const dirty =
-    !prediction || prediction.home !== home || prediction.away !== away;
+  // Model numbers from the stored Poisson odds (absent on finished matches).
+  const model = useMemo(() => {
+    if (!match.odds) return null;
+    const { ph, pd, pa } = matchProbs(match.odds.lh, match.odds.la);
+    const ai = aiPredictionFor(match); // { home, away } most-likely scoreline
+    const oc = { H: "1", D: "X", A: "2" }[predict1x2(match.odds.lh, match.odds.la)];
+    return { pct: { "1": pct(ph), X: pct(pd), "2": pct(pa) }, score: ai, outcome: oc };
+  }, [match]);
 
-  const score = scorePrediction(prediction, match);
+  const picked = prediction?.outcome || (prediction ? outcomeOf(prediction.home, prediction.away) : null);
+  const hasExact = !!prediction?.scoreExact;
 
-  // Human-readable verdict for a finished match.
-  const verdict = (() => {
-    if (match.status !== "finished" || !prediction || !score) return null;
-    const called = `You called ${prediction.home}–${prediction.away}`;
-    const tag = score.exact ? "Exact score +5" : score.result ? "Right result +3" : "No points";
-    return { cls: score.exact ? "v5" : score.result ? "v3" : "v0", text: `${called} · ${tag}` };
-  })();
-
-  async function save() {
-    if (!user) return onRequireSignIn();
+  // ── write-through autosave (§2.4: no submit button) ──
+  async function writePick(next) {
+    if (!user) return onRequireSignIn?.();
+    if (savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     try {
-      await setDoc(doc(db, "predictions", `${user.uid}_${match.id}`), {
-        uid: user.uid,
-        matchId: match.id,
-        home,
-        away,
-        displayName: user.displayName || "Anonymous",
-        photoURL: user.photoURL || "",
-        updatedAt: serverTimestamp(),
-      });
-      // Make sure a leaderboard row exists for this player
+      const ref = doc(db, "predictions", `${user.uid}_${match.id}`);
       await setDoc(
-        doc(db, "users", user.uid),
+        ref,
         {
+          uid: user.uid,
+          matchId: match.id,
+          // v2 fields
+          outcome: next.outcome,
+          scoreExact: !!next.scoreExact,
+          isBanker: next.isBanker ?? prediction?.isBanker ?? false,
+          // bridge fields (current rules require int home/away 0–15)
+          home: clamp(next.home, 0, 9),
+          away: clamp(next.away, 0, 9),
           displayName: user.displayName || "Anonymous",
           photoURL: user.photoURL || "",
+          updatedAt: serverTimestamp(),
+          ...(prediction ? {} : { createdAt: serverTimestamp() }),
         },
         { merge: true }
       );
-      setSavedFlash(true);
-      setTimeout(() => setSavedFlash(false), 1600);
     } catch (e) {
-      alert("Could not save prediction: " + e.message);
+      console.error("Save failed:", e);
+      alert("Couldn't save your pick — " + (e.code || e.message));
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
 
-  const kickoffLabel = kickoffMs
-    ? new Date(kickoffMs).toLocaleString(undefined, {
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      })
-    : "";
+  // Tap 1 / X / 2 → set result, default the scoreline from the model (§2.2 A).
+  function pickOutcome(oc) {
+    if (locked || settled) return;
+    const base =
+      model?.score && model.outcome === oc
+        ? model.score
+        : oc === "1"
+        ? { home: 1, away: 0 }
+        : oc === "X"
+        ? { home: 1, away: 1 }
+        : { home: 0, away: 1 };
+    writePick({ outcome: oc, home: base.home, away: base.away, scoreExact: hasExact && picked === oc });
+  }
+
+  function saveExact(h, a) {
+    writePick({ outcome: outcomeOf(h, a), home: h, away: a, scoreExact: true });
+    setSheetOpen(false);
+  }
+
+  async function toggleBanker() {
+    if (!picked || locked || settled || !user) return;
+    const turningOn = !prediction.isBanker;
+    // Turning OFF is a plain single write.
+    if (!turningOn) {
+      return writePick({ outcome: picked, home: prediction.home, away: prediction.away, scoreExact: hasExact, isBanker: false });
+    }
+    // Turning ON: one banker per gameweek — clear it from any still-open
+    // sibling in the same gameweek in one atomic batch. Locked/finished
+    // siblings are skipped (rules block edits after kickoff, and an atomic
+    // batch would fail if it tried); that edge is finalised server-side in P3.
+    try {
+      const batch = writeBatch(db);
+      batch.set(
+        doc(db, "predictions", `${user.uid}_${match.id}`),
+        {
+          uid: user.uid, matchId: match.id, outcome: picked, scoreExact: hasExact,
+          home: prediction.home, away: prediction.away, isBanker: true,
+          displayName: user.displayName || "Anonymous", photoURL: user.photoURL || "",
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+      for (const sib of gameweekMatches || []) {
+        if (sib.id === match.id) continue;
+        const sp = allPredictions?.[sib.id];
+        const sibOpen = sib.status !== "finished" && toMillis(sib.kickoff) > Date.now();
+        if (sp?.isBanker && sibOpen) {
+          batch.set(doc(db, "predictions", `${user.uid}_${sib.id}`), { isBanker: false, updatedAt: serverTimestamp() }, { merge: true });
+        }
+      }
+      await batch.commit();
+    } catch (e) {
+      console.error("Banker toggle failed:", e);
+      alert("Couldn't set banker — " + (e.code || e.message));
+    }
+  }
+
+  // Settled scoring for the reveal (§2.5).
+  const settledScore = settled ? scorePrediction(prediction, match) : null;
+  const resultOutcome = settled ? outcomeOf(match.homeScore, match.awayScore) : null;
+  const wasCorrect = settled && prediction && picked === resultOutcome;
+
+  const kickoffLabel = new Date(kickoffMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
   return (
-    <article className={"card" + (locked ? " locked" : "")}>
-      <div className="card-meta">
-        <span className="comp">{match.competition || "Friendly"}</span>
-        <span className="ko">
-          {match.status === "finished" ? (
-            <b className="ft-chip">FT</b>
-          ) : countdown ? (
-            <>
-              {kickoffLabel} · <b className="count">{countdown}</b>
-            </>
-          ) : (
-            <b className="live-chip">{match.live ? "● Live" : "Kicked off"}</b>
-          )}
-        </span>
-      </div>
-
-      {match.venue && <p className="venue">{match.venue}</p>}
-
-      <div className="board">
-        <Team name={match.home} flag={match.homeFlag} side="home" />
-
-        <div className="scorebox">
-          {match.status === "finished" ? (
-            <div className="final">
-              <span className="digit">{match.homeScore}</span>
-              <span className="dash">–</span>
-              <span className="digit">{match.awayScore}</span>
-            </div>
-          ) : (
-            <div className="steppers">
-              <Stepper value={home} onChange={setHome} disabled={locked} label={`${match.home} goals`} />
-              <span className="dash">–</span>
-              <Stepper value={away} onChange={setAway} disabled={locked} label={`${match.away} goals`} />
-            </div>
-          )}
+    <div
+      style={{
+        background: C.card,
+        border: `1px solid ${prediction?.isBanker ? C.accent : C.border}`,
+        borderRadius: 16,
+        padding: "14px 16px",
+        marginTop: 12,
+        position: "relative",
+      }}
+    >
+      {/* header row: teams + status */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+        <div style={{ fontWeight: 700, color: C.text, fontSize: 15 }}>
+          {match.home} <span style={{ color: C.mutedText, fontWeight: 400 }}>v</span> {match.away}
         </div>
-
-        <Team name={match.away} flag={match.awayFlag} side="away" />
+        <StatusPill {...{ settled, locked, open, now, kickoffMs, kickoffLabel }} />
       </div>
 
-      {match.odds && match.status !== "finished" && (
-        <OddsStrip odds={match.odds} home={home} away={away} locked={locked} match={match} />
-      )}
-
-      {(match.homeForm || match.awayForm || match.h2h) && match.status !== "finished" && (
-        <div className="form-row">
-          <FormPips form={match.homeForm} align="left" />
-          {match.h2h ? (
-            <span className="h2h" title="Head-to-head this season (home wins · draws · away wins)">
-              H2H {match.h2h.homeWins}·{match.h2h.draws}·{match.h2h.awayWins}
-            </span>
-          ) : (
-            <span className="h2h dim">First meeting</span>
-          )}
-          <FormPips form={match.awayForm} align="right" />
+      {/* competition / venue line */}
+      {(match.competition || match.venue) && (
+        <div style={{ color: C.mutedText, fontSize: 11, marginTop: 2 }}>
+          {[match.competition, match.venue].filter(Boolean).join(" · ")}
         </div>
       )}
 
-      <div className="card-foot">
-        {match.status === "finished" ? (
-          verdict ? (
-            <span className={"verdict " + verdict.cls}>{verdict.text}</span>
-          ) : (
-            <span className="verdict">No prediction made</span>
-          )
-        ) : locked ? (
-          <span className="verdict">
-            Predictions closed
-            {prediction
-              ? ` · you called ${prediction.home}–${prediction.away}` +
-                (prediction.autoPicked ? " (auto-pick)" : "")
-              : ""}
-          </span>
-        ) : (
-          <button
-            className="btn solid"
-            onClick={save}
-            disabled={saving || (!dirty && !!prediction)}
-          >
-            {saving
-              ? "Saving…"
-              : savedFlash
-              ? "Locked in ✓"
-              : prediction
-              ? dirty
-                ? "Update prediction"
-                : "Prediction saved"
-              : "Lock in prediction"}
-          </button>
-        )}
-      </div>
+      {/* SETTLED reveal */}
+      {settled ? (
+        <SettledView
+          match={match}
+          prediction={prediction}
+          picked={picked}
+          hasExact={hasExact}
+          wasCorrect={wasCorrect}
+          score={settledScore}
+        />
+      ) : (
+        <>
+          {/* 1 / X / 2 chips with model % */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 12 }}>
+            {["1", "X", "2"].map((oc) => {
+              const active = picked === oc;
+              const isModel = model?.outcome === oc;
+              return (
+                <button
+                  key={oc}
+                  disabled={locked}
+                  onClick={() => (user ? pickOutcome(oc) : onRequireSignIn?.())}
+                  style={{
+                    padding: "10px 4px",
+                    borderRadius: 12,
+                    border: `1px solid ${active ? C.accent : C.border}`,
+                    background: active ? C.accent : C.chip,
+                    color: active ? "#0c0f08" : C.text,
+                    fontWeight: 800,
+                    cursor: locked ? "not-allowed" : "pointer",
+                    opacity: locked && !active ? 0.4 : 1,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: 2,
+                  }}
+                >
+                  <span style={{ fontSize: 16 }}>{oc === "1" ? "Home" : oc === "X" ? "Draw" : "Away"}</span>
+                  {model && (
+                    <span style={{ fontSize: 11, fontWeight: 600, opacity: active ? 0.8 : 0.6 }}>
+                      {model.pct[oc]}%{isModel ? " ◆" : ""}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
 
-    </article>
-  );
-}
+          {/* exact score + banker row */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
+            <button
+              disabled={locked}
+              onClick={() => (user ? setSheetOpen(true) : onRequireSignIn?.())}
+              style={{
+                flex: 1,
+                padding: "9px 12px",
+                borderRadius: 10,
+                border: `1px dashed ${C.border}`,
+                background: "transparent",
+                color: hasExact ? C.text : C.mutedText,
+                fontWeight: 600,
+                cursor: locked ? "not-allowed" : "pointer",
+                opacity: locked ? 0.4 : 1,
+              }}
+            >
+              {hasExact ? `Exact: ${prediction.home}–${prediction.away}` : "＋ Add exact score (+2)"}
+            </button>
 
-function OddsStrip({ odds, home, away, locked, match }) {
-  const { ph, pd, pa, top } = matchProbs(odds.lh, odds.la);
-  const yourP = scoreP(odds.lh, odds.la, home, away);
-  const ko = match?.phase === "knockout" ? predictKnockout(odds.lh, odds.la) : null;
-  const advancer = ko ? (ko.advancer === "H" ? match.home : match.away) : null;
-  return (
-    <div className="odds-strip">
-      <div
-        className="odds-bar"
-        role="img"
-        aria-label={`Model win probabilities: home ${pct(ph)} percent, draw ${pct(pd)} percent, away ${pct(pa)} percent`}
-      >
-        <span className="seg home" style={{ flexGrow: ph }}>{pct(ph)}%</span>
-        <span className="seg draw" style={{ flexGrow: pd }}>{pct(pd)}%</span>
-        <span className="seg away" style={{ flexGrow: pa }}>{pct(pa)}%</span>
-      </div>
-      <p className="odds-note">
-        {ko ? (
-          <>
-            AI Model: {advancer} to advance
-            {ko.decided === "penalties" ? " on penalties" : ""} · most likely {ko.h}–{ko.a} ({pct(ko.p)}%)
-          </>
-        ) : (
-          <>AI Model: most likely {top.h}–{top.a} ({pct(top.p)}%)</>
-        )}
-        {!locked && (
-          <>
-            {" "}· your call {home}–{away} ({pct(yourP)}%)
-          </>
-        )}
-        {odds.n < 6 && <span className="odds-early"> · early-tournament estimate</span>}
-      </p>
+            <button
+              disabled={!picked || locked}
+              onClick={toggleBanker}
+              aria-pressed={!!prediction?.isBanker}
+              title="Banker: 2× points & 2× roast if right"
+              style={{
+                padding: "9px 12px",
+                borderRadius: 10,
+                border: `1px solid ${prediction?.isBanker ? C.accent : C.border}`,
+                background: prediction?.isBanker ? "rgba(201,242,77,0.15)" : "transparent",
+                color: prediction?.isBanker ? C.accent : C.mutedText,
+                fontWeight: 700,
+                cursor: !picked || locked ? "not-allowed" : "pointer",
+                opacity: !picked || locked ? 0.4 : 1,
+              }}
+            >
+              {prediction?.isBanker ? "🔥 Banker" : "☆ Banker"}
+            </button>
+          </div>
+
+          {/* state footnote */}
+          <div style={{ marginTop: 8, fontSize: 11, color: C.mutedText, minHeight: 14 }}>
+            {locked
+              ? "🔒 Locked at kickoff — your pick is frozen."
+              : picked
+              ? `Editable until ${kickoffLabel}${saving ? " · saving…" : " · saved ✓"}`
+              : "Pick right, get roasted."}
+          </div>
+        </>
+      )}
+
+      {/* exact-score bottom sheet (§2.2 B) */}
+      {sheetOpen && (
+        <ScoreSheet
+          initial={{ home: prediction?.home ?? model?.score?.home ?? 1, away: prediction?.away ?? model?.score?.away ?? 0 }}
+          model={model?.score}
+          onClose={() => setSheetOpen(false)}
+          onSave={saveExact}
+        />
+      )}
     </div>
   );
 }
 
-function FormPips({ form, align }) {
-  const pips = (form || "").split("").slice(-5);
+function StatusPill({ settled, locked, open, now, kickoffMs, kickoffLabel }) {
+  let label, color;
+  if (settled) {
+    label = "FT";
+    color = C.mutedText;
+  } else if (locked) {
+    label = "LOCKED";
+    color = C.coral;
+  } else {
+    label = `locks in ${fmtCountdown(kickoffMs - now)}`;
+    color = C.accent;
+  }
   return (
-    <span className={"form-pips " + align} aria-label={form ? `Last ${pips.length}: ${pips.join(" ")}` : "No form data"}>
-      {pips.length === 0 ? (
-        <i className="pip none">–</i>
-      ) : (
-        pips.map((r, i) => (
-          <i key={i} className={"pip " + r.toLowerCase()}>
-            {r}
-          </i>
-        ))
-      )}
+    <span
+      style={{
+        fontSize: 11,
+        fontWeight: 700,
+        color,
+        border: `1px solid ${C.border}`,
+        borderRadius: 999,
+        padding: "3px 9px",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {open ? `⏱ ${label}` : label}
     </span>
   );
 }
 
-function Team({ name, flag, side }) {
+function SettledView({ match, prediction, picked, hasExact, wasCorrect, score }) {
+  const good = wasCorrect;
+  const missed = !prediction;
   return (
-    <div className={"team " + side}>
-      <Flag flag={flag} imgClass="crest" emojiClass="flag" />
-      <span className="tname">{name}</span>
+    <div style={{ marginTop: 12 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          background: missed ? "transparent" : good ? "rgba(94,242,168,0.12)" : "rgba(255,107,107,0.12)",
+          border: `1px solid ${missed ? C.border : good ? C.mint : C.coral}`,
+          borderRadius: 12,
+          padding: "10px 12px",
+        }}
+      >
+        <div style={{ fontWeight: 800, fontSize: 18, color: C.text }}>
+          {match.homeScore}–{match.awayScore}
+        </div>
+        {missed ? (
+          <div style={{ color: C.mutedText, fontSize: 12 }}>You ghosted this one — no roast, no points.</div>
+        ) : (
+          <div style={{ textAlign: "right" }}>
+            <div style={{ color: good ? C.mint : C.coral, fontWeight: 700, fontSize: 13 }}>
+              You: {picked === "1" ? "Home" : picked === "X" ? "Draw" : "Away"}
+              {hasExact ? ` ${prediction.home}–${prediction.away}` : ""} {prediction.isBanker ? "🔥" : ""}
+            </div>
+            <div style={{ color: C.mutedText, fontSize: 12 }}>
+              {score?.total ? `+${score.total} pts` : "0 pts"}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-function Stepper({ value, onChange, disabled, label }) {
+// §2.2 B — steppers 0–9 + "use model score"
+function ScoreSheet({ initial, model, onClose, onSave }) {
+  const [h, setH] = useState(initial.home);
+  const [a, setA] = useState(initial.away);
+  const step = (setter, v, d) => setter(clamp(v + d, 0, 9));
+
   return (
-    <div className="stepper">
-      <button
-        type="button"
-        className="tick up"
-        aria-label={`Increase ${label}`}
-        disabled={disabled || value >= 15}
-        onClick={() => onChange(value + 1)}
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 40 }} />
+      <div
+        style={{
+          position: "fixed",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: 41,
+          background: "#14170e",
+          borderTop: `1px solid ${C.border}`,
+          borderRadius: "18px 18px 0 0",
+          padding: "18px 18px 26px",
+          maxWidth: 520,
+          margin: "0 auto",
+        }}
       >
-        ▲
-      </button>
-      <output className="digit" aria-label={label}>{value}</output>
-      <button
-        type="button"
-        className="tick down"
-        aria-label={`Decrease ${label}`}
-        disabled={disabled || value <= 0}
-        onClick={() => onChange(value - 1)}
-      >
-        ▼
-      </button>
+        <div style={{ width: 36, height: 4, borderRadius: 4, background: C.border, margin: "0 auto 14px" }} />
+        <div style={{ color: C.text, fontWeight: 700, textAlign: "center", marginBottom: 16 }}>Exact score</div>
+
+        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 18 }}>
+          <Stepper value={h} onDec={() => step(setH, h, -1)} onInc={() => step(setH, h, 1)} />
+          <span style={{ color: C.mutedText, fontWeight: 800, fontSize: 22 }}>–</span>
+          <Stepper value={a} onDec={() => step(setA, a, -1)} onInc={() => step(setA, a, 1)} />
+        </div>
+
+        {model && (
+          <button
+            onClick={() => {
+              setH(model.home);
+              setA(model.away);
+            }}
+            style={{
+              display: "block",
+              margin: "18px auto 0",
+              padding: "8px 14px",
+              borderRadius: 999,
+              border: `1px solid ${C.border}`,
+              background: "transparent",
+              color: C.accent,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            ⚡ Use model score ({model.home}–{model.away})
+          </button>
+        )}
+
+        <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+          <button
+            onClick={onClose}
+            style={{ flex: 1, padding: "12px", borderRadius: 12, border: `1px solid ${C.border}`, background: "transparent", color: C.text, fontWeight: 700, cursor: "pointer" }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => onSave(h, a)}
+            style={{ flex: 2, padding: "12px", borderRadius: 12, border: "none", background: C.accent, color: "#0c0f08", fontWeight: 800, cursor: "pointer" }}
+          >
+            Save {h}–{a}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function Stepper({ value, onDec, onInc }) {
+  const btn = {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    border: `1px solid ${C.border}`,
+    background: "rgba(255,255,255,0.04)",
+    color: C.text,
+    fontSize: 22,
+    fontWeight: 800,
+    cursor: "pointer",
+  };
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <button onClick={onDec} style={btn} aria-label="decrease">−</button>
+      <span style={{ minWidth: 30, textAlign: "center", color: C.accent, fontWeight: 900, fontSize: 30 }}>{value}</span>
+      <button onClick={onInc} style={btn} aria-label="increase">+</button>
     </div>
   );
 }

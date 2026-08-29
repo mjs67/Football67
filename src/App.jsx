@@ -16,12 +16,16 @@ import { auth, db, googleProvider } from "./firebase.js";
 import { scorePrediction } from "./poisson.js";
 import { displayNameOf } from "./nameUtils.js";
 import MatchCard from "./components/MatchCard.jsx";
+import Gameweek from "./components/Gameweek.jsx";
+import Feed from "./components/Feed.jsx";
 import Leaderboard from "./components/Leaderboard.jsx";
 import MyPicks from "./components/MyPicks.jsx";
 import Groups from "./components/Groups.jsx";
 import ChampionPick from "./components/ChampionPick.jsx";
+import Onboarding from "./components/Onboarding.jsx";
 
 const TABS = [
+  { id: "roasts", label: "Roasts" },
   { id: "fixtures", label: "Fixtures" },
   { id: "picks", label: "My Picks" },
   { id: "champion", label: "Champion" },
@@ -38,6 +42,10 @@ export default function App() {
   const [loadingMatches, setLoadingMatches] = useState(true);
   const [leaderTop, setLeaderTop] = useState(null); // { name, points }
   const [latestRoast, setLatestRoast] = useState(null); // { roastText, targetName, matchName, finalScore }
+
+  // Forced-handle gate (§14.1)
+  const [handleReady, setHandleReady] = useState(false); // users doc has loaded
+  const [hasHandle, setHasHandle] = useState(false);     // a nickname is set
 
   // SEO: set document title
   useEffect(() => {
@@ -78,6 +86,22 @@ export default function App() {
     return () => {
       cancelled = true;
     };
+  }, [user]);
+
+  // Forced handle gate (§14.1): a signed-in user without a nickname is routed
+  // through onboarding before they can use the app. Live snapshot so completing
+  // onboarding flips the gate instantly.
+  useEffect(() => {
+    if (!user) {
+      setHandleReady(false);
+      setHasHandle(false);
+      return;
+    }
+    return onSnapshot(doc(db, "users", user.uid), (snap) => {
+      const nick = snap.exists() ? snap.data().nickname || "" : "";
+      setHasHandle(nick.trim().length >= 3);
+      setHandleReady(true);
+    });
   }, [user]);
 
   // Top leaderboard player for hero roast card (live)
@@ -149,8 +173,9 @@ export default function App() {
     return pts;
   }, [matches, predictions]);
 
-  const upcoming = matches.filter((m) => m.status !== "finished");
-  const finished = matches.filter((m) => m.status === "finished");
+
+  // Signed in, but no handle yet → block the app behind onboarding.
+  const needsOnboarding = authReady && !!user && handleReady && !hasHandle;
 
   async function handleSignIn() {
     try {
@@ -182,7 +207,7 @@ export default function App() {
               <span className="account-pts">
                 <b>{myPoints}</b> pts
               </span>
-              <AccountMenu user={user} />
+              {!needsOnboarding && <AccountMenu user={user} />}
               <button className="btn ghost" onClick={() => signOut(auth)}>
                 Sign out
               </button>
@@ -194,140 +219,127 @@ export default function App() {
           ))}
       </header>
 
-      <section className="hero">
-        <p className="hero-eyebrow">Matchday is open</p>
-        <h1>
-          Call the score.
-          <br />
-          <em>Before the whistle.</em>
-        </h1>
-        <p className="hero-roast-tagline">Correct Result gets you Roasted! 🔥</p>
-        <div className="hero-pills">
-          <div className="hero-pill">
-            <span className="hero-pill-val">5 pts</span>
-            <span className="hero-pill-label">Exact score</span>
-          </div>
-          <div className="hero-pill">
-            <span className="hero-pill-val">3 pts</span>
-            <span className="hero-pill-label">Correct result</span>
-          </div>
-        </div>
-        {latestRoast ? (
-          <div className="hero-roast-card hero-roast-card--live">
-            <div className="hero-roast-header">
-              <span className="hero-roast-flame">🔥</span>
-              <span className="hero-roast-label">Just got roasted</span>
-            </div>
-            <div className="hero-roast-body">
-              <div className="hero-roast-leader">
-                <span className="hero-roast-name">{latestRoast.targetName}</span>
-                {latestRoast.matchName && (
-                  <span className="hero-roast-pts">
-                    {latestRoast.matchName}
-                    {latestRoast.predictedScore ? ` · ${latestRoast.predictedScore}` : latestRoast.finalScore ? ` · ${latestRoast.finalScore}` : ""}
-                  </span>
-                )}
+      {needsOnboarding ? (
+        <Onboarding user={user} onDone={() => setTab("fixtures")} />
+      ) : (
+        <>
+          <section className="hero">
+            <p className="hero-eyebrow">Matchday is open</p>
+            <h1>
+              Call the score.
+              <br />
+              <em>Before the whistle.</em>
+            </h1>
+            <p className="hero-roast-tagline">Correct Result gets you Roasted! 🔥</p>
+            <div className="hero-pills">
+              <div className="hero-pill">
+                <span className="hero-pill-val">5 pts</span>
+                <span className="hero-pill-label">Exact score</span>
               </div>
-              <p className="hero-roast-quote">{latestRoast.roastText}</p>
-              <p className="hero-roast-caption">
-                Call it right and the whole site finds out.
-              </p>
-            </div>
-          </div>
-        ) : (
-          leaderTop &&
-          leaderTop.points > 0 && (
-            <div className="hero-roast-card">
-              <div className="hero-roast-header">
-                <span className="hero-roast-flame">🔥</span>
-                <span className="hero-roast-label">This week's target</span>
+              <div className="hero-pill">
+                <span className="hero-pill-val">3 pts</span>
+                <span className="hero-pill-label">Correct result</span>
               </div>
-              <div className="hero-roast-body">
-                <div className="hero-roast-leader">
-                  <span className="hero-roast-name">{leaderTop.name}</span>
-                  <span className="hero-roast-pts">{leaderTop.points} pts</span>
+            </div>
+            {latestRoast ? (
+              <div className="hero-roast-card hero-roast-card--live">
+                <div className="hero-roast-header">
+                  <span className="hero-roast-flame">🔥</span>
+                  <span className="hero-roast-label">Just got roasted</span>
                 </div>
-                <p className="hero-roast-quote">
-                  Riding a hot streak or just vibing? Either way, they're going down.
-                </p>
+                <div className="hero-roast-body">
+                  <div className="hero-roast-leader">
+                    <span className="hero-roast-name">{latestRoast.targetName}</span>
+                    {latestRoast.matchName && (
+                      <span className="hero-roast-pts">
+                        {latestRoast.matchName}
+                        {latestRoast.predictedScore ? ` · ${latestRoast.predictedScore}` : latestRoast.finalScore ? ` · ${latestRoast.finalScore}` : ""}
+                      </span>
+                    )}
+                  </div>
+                  <p className="hero-roast-quote">{latestRoast.roastText}</p>
+                  <p className="hero-roast-caption">
+                    Call it right and the whole site finds out.
+                  </p>
+                </div>
               </div>
-            </div>
-          )
-        )}
-        {!user && authReady && (
-          <button className="btn solid lg" onClick={handleSignIn}>
-            <GoogleMark /> Sign in to play
-          </button>
-        )}
-      </section>
-
-      <nav className="tabs" role="tablist">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            role="tab"
-            aria-selected={tab === t.id}
-            className={tab === t.id ? "tab active" : "tab"}
-            onClick={() => setTab(t.id)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </nav>
-
-      <main>
-        {tab === "fixtures" && (
-          <>
-            {loadingMatches && <p className="empty">Loading fixtures…</p>}
-            {!loadingMatches && matches.length === 0 && (
-              <p className="empty">
-                No fixtures yet. Run <code>npm run seed</code> to add some.
-              </p>
+            ) : (
+              leaderTop &&
+              leaderTop.points > 0 && (
+                <div className="hero-roast-card">
+                  <div className="hero-roast-header">
+                    <span className="hero-roast-flame">🔥</span>
+                    <span className="hero-roast-label">This week's target</span>
+                  </div>
+                  <div className="hero-roast-body">
+                    <div className="hero-roast-leader">
+                      <span className="hero-roast-name">{leaderTop.name}</span>
+                      <span className="hero-roast-pts">{leaderTop.points} pts</span>
+                    </div>
+                    <p className="hero-roast-quote">
+                      Riding a hot streak or just vibing? Either way, they're going down.
+                    </p>
+                  </div>
+                </div>
+              )
             )}
-
-            {upcoming.length > 0 && (
-              <h2 className="section-label">Upcoming</h2>
+            {!user && authReady && (
+              <button className="btn solid lg" onClick={handleSignIn}>
+                <GoogleMark /> Sign in to play
+              </button>
             )}
-            {upcoming.map((m) => (
-              <MatchCard
-                key={m.id}
-                match={m}
+          </section>
+
+          <nav className="tabs" role="tablist">
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                role="tab"
+                aria-selected={tab === t.id}
+                className={tab === t.id ? "tab active" : "tab"}
+                onClick={() => setTab(t.id)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </nav>
+
+          <main>
+            {tab === "fixtures" &&
+              (loadingMatches ? (
+                <p className="empty">Loading fixtures…</p>
+              ) : matches.length === 0 ? (
+                <p className="empty">
+                  No fixtures yet. Run <code>npm run seed</code> to add some.
+                </p>
+              ) : (
+                <Gameweek
+                  matches={matches}
+                  user={user}
+                  predictions={predictions}
+                  onRequireSignIn={handleSignIn}
+                />
+              ))}
+
+            {tab === "picks" && (
+              <MyPicks
                 user={user}
-                prediction={predictions[m.id]}
+                matches={matches}
+                predictions={predictions}
                 onRequireSignIn={handleSignIn}
               />
-            ))}
-
-            {finished.length > 0 && (
-              <h2 className="section-label">Full time</h2>
             )}
-            {finished.map((m) => (
-              <MatchCard
-                key={m.id}
-                match={m}
-                user={user}
-                prediction={predictions[m.id]}
-                onRequireSignIn={handleSignIn}
-              />
-            ))}
-          </>
-        )}
 
-        {tab === "picks" && (
-          <MyPicks
-            user={user}
-            matches={matches}
-            predictions={predictions}
-            onRequireSignIn={handleSignIn}
-          />
-        )}
+            {tab === "groups" && <Groups user={user} matches={matches} onRequireSignIn={handleSignIn} />}
 
-        {tab === "groups" && <Groups user={user} matches={matches} onRequireSignIn={handleSignIn} />}
+            {tab === "champion" && <ChampionPick user={user} onRequireSignIn={handleSignIn} />}
 
-        {tab === "champion" && <ChampionPick user={user} onRequireSignIn={handleSignIn} />}
+            {tab === "roasts" && <Feed user={user} onRequireSignIn={handleSignIn} />}
 
-        {tab === "table" && <Leaderboard me={user} />}
-      </main>
+            {tab === "table" && <Leaderboard me={user} />}
+          </main>
+        </>
+      )}
 
       <footer className="foot">
         football67.com · results by football-data.org · Not affiliated with FIFA.

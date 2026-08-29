@@ -1,0 +1,25 @@
+{
+  "_note": "Verify this list against the actual 2026/27 Premier League (promotions/relegations shift it). crestUrl intentionally empty — MVP uses text monograms + colorHex to sidestep crest trademark risk (§15.1).",
+  "teams": [
+    { "id": "ars", "name": "Arsenal",                "shortCode": "ARS", "colorHex": "#EF0107" },
+    { "id": "avl", "name": "Aston Villa",            "shortCode": "AVL", "colorHex": "#95BFE5" },
+    { "id": "bou", "name": "Bournemouth",            "shortCode": "BOU", "colorHex": "#DA291C" },
+    { "id": "bre", "name": "Brentford",              "shortCode": "BRE", "colorHex": "#E30613" },
+    { "id": "bha", "name": "Brighton & Hove Albion", "shortCode": "BHA", "colorHex": "#0057B8" },
+    { "id": "bur", "name": "Burnley",                "shortCode": "BUR", "colorHex": "#6C1D45" },
+    { "id": "che", "name": "Chelsea",                "shortCode": "CHE", "colorHex": "#034694" },
+    { "id": "cry", "name": "Crystal Palace",         "shortCode": "CRY", "colorHex": "#1B458F" },
+    { "id": "eve", "name": "Everton",                "shortCode": "EVE", "colorHex": "#003399" },
+    { "id": "ful", "name": "Fulham",                 "shortCode": "FUL", "colorHex": "#000000" },
+    { "id": "lee", "name": "Leeds United",           "shortCode": "LEE", "colorHex": "#FFCD00" },
+    { "id": "liv", "name": "Liverpool",              "shortCode": "LIV", "colorHex": "#C8102E" },
+    { "id": "mci", "name": "Manchester City",        "shortCode": "MCI", "colorHex": "#6CABDD" },
+    { "id": "mun", "name": "Manchester United",      "shortCode": "MUN", "colorHex": "#DA291C" },
+    { "id": "new", "name": "Newcastle United",       "shortCode": "NEW", "colorHex": "#241F20" },
+    { "id": "nfo", "name": "Nottingham Forest",      "shortCode": "NFO", "colorHex": "#DD0000" },
+    { "id": "sun", "name": "Sunderland",             "shortCode": "SUN", "colorHex": "#EB172B" },
+    { "id": "tot", "name": "Tottenham Hotspur",      "shortCode": "TOT", "colorHex": "#132257" },
+    { "id": "whu", "name": "West Ham United",        "shortCode": "WHU", "colorHex": "#7A263A" },
+    { "id": "wol", "name": "Wolverhampton",          "shortCode": "WOL", "colorHex": "#FDB913" }
+  ]
+}

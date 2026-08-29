@@ -1,11 +1,60 @@
 {
   "indexes": [
     {
-      "collectionGroup": "matches",
+      "collectionGroup": "fixtures",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "gameweekId", "order": "ASCENDING" },
+        { "fieldPath": "kickoff", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "fixtures",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "leagueId", "order": "ASCENDING" },
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "kickoff", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "gameweeks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "seasonId", "order": "ASCENDING" },
+        { "fieldPath": "number", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "predictions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "gameweekId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "roasts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "public", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "roasts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "public", "order": "ASCENDING" },
+        { "fieldPath": "brutalScore", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "roasts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "public", "order": "ASCENDING" },
+        { "fieldPath": "shareCount", "order": "DESCENDING" }
       ]
     }
   ],

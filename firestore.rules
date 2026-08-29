@@ -2,6 +2,28 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // v2 per-prediction roast feed (§6). Public roasts are world-readable
+    // (like globalRoasts). Roast docs are written only by the settlement
+    // scripts (Admin SDK) — never by clients.
+    match /roasts/{roastId} {
+      allow read: if resource.data.public == true;
+      allow write: if false;
+    }
+
+    // Reactions: one doc per user per roast, id = "{uid}_{roastId}".
+    // A user may only create / change / remove their OWN reaction.
+    match /reactions/{reactionId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && reactionId == request.auth.uid + '_' + request.resource.data.roastId
+        && request.resource.data.type in ['fire', 'skull', 'sob', 'yawn'];
+      allow update: if request.auth != null
+        && reactionId.split('_')[0] == request.auth.uid
+        && request.resource.data.type in ['fire', 'skull', 'sob', 'yawn'];
+      allow delete: if request.auth != null
+        && reactionId.split('_')[0] == request.auth.uid;
+    }	
+
     // Fixtures: public read; written only by the sync/admin scripts (Admin SDK)
     match /matches/{matchId} {
       allow read: if true;

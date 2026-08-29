@@ -12,8 +12,7 @@
 import { readFileSync } from "node:fs";
 import { db, admin } from "./admin.js";
 import { recomputeLeaderboard } from "./recompute.js";
-import { buildRoastContext, generateRoastsForLeagues, generateGlobalRoast } from "./roastGeneration.js";
-import { venueFromSchedule } from "./wc2026Venues.js";
+import { buildRoastContext, generateRoastsForLeagues, generateGlobalRoast, generatePredictionRoasts } from "./roastGeneration.js";
 import { KO_STAGE_ORDER, STAGE_NAMES, teamName, stageLabel } from "./stages.js";
 import { predictKnockout } from "../src/poisson.js";
 import { buildFeatures, predictGoals } from "./mlClient.js";
@@ -257,13 +256,7 @@ function venueLabel(m) {
   // football-data.org doesn't return a `venue` field for WC2026 matches at
   // all (confirmed 104/104) — fall back to the static FIFA schedule, matched
   // by kickoff time (+ teams where known), before giving up.
-  const raw =
-    m.venue ||
-    venueFromSchedule(
-      teamName(m.homeTeam),
-      teamName(m.awayTeam),
-      m.utcDate
-    );
+  const raw = m.venue;
   if (!raw) return null;
   const lower = raw.toLowerCase();
   for (const [keyword, place] of Object.entries(venuePlaces)) {
@@ -306,6 +299,7 @@ for (const m of data.matches) {
     externalId: m.id,
     home,
     away,
+    matchday: m.matchday ?? null,
     homeFlag: m.homeTeam.crest || "⚽",
     awayFlag: m.awayTeam.crest || "⚽",
     competition: stageLabel(m) ? `${compName} · ${stageLabel(m)}` : compName,
@@ -396,6 +390,9 @@ if (finishedThisSync.length > 0) {
     const preds = predsSnap.docs.map((d) => d.data());
     await generateRoastsForLeagues(db, roastCtx, matchId, matchName, finalScore, preds, {});
     await generateGlobalRoast(db, roastCtx, matchId, matchName, finalScore, preds, {});
+    // Phase 4: classify trigger, stamp it on the prediction, and write the
+    // per-prediction roast doc from the reviewed bank (§5.1–5.3).
+    await generatePredictionRoasts(db, roastCtx, matchId, matchName, finalScore, preds);
   }
 }
 
